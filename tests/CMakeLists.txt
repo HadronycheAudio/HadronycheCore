@@ -10,7 +10,7 @@ set(VST3_SDK_DIR "" CACHE PATH "A VST3 SDK checkout, to also test the parts that
 if(VST3_SDK_DIR)
     option(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES "Build the VST3 SDK example plug-ins" OFF)
     option(SMTG_ENABLE_VST3_HOSTING_EXAMPLES "Build the VST3 SDK example hosts" OFF)
-    option(SMTG_ENABLE_VSTGUI_SUPPORT "Build VSTGUI, used for the editor UI" OFF)
+    option(SMTG_ENABLE_VSTGUI_SUPPORT "Build VSTGUI, used for the editor UI" ON)
     option(SMTG_CREATE_PLUGIN_LINK "Symlink the built plug-in into the VST3 folder" OFF)
     add_subdirectory("${VST3_SDK_DIR}" "${CMAKE_BINARY_DIR}/vst3sdk" EXCLUDE_FROM_ALL)
     smtg_enable_vst3_sdk()
@@ -19,4 +19,9 @@ if(VST3_SDK_DIR)
     target_compile_definitions(HadronycheCoreVstTests PRIVATE UNICODE _UNICODE NOMINMAX)
     target_link_libraries(HadronycheCoreVstTests PRIVATE hadronyche_vst)
     add_test(NAME core-vst COMMAND HadronycheCoreVstTests)
+
+    # Only built. Driving a real panel takes a real plug-in, so the plug-ins' panel tests cover what it does.
+    add_library(HadronycheCoreGuiCheck STATIC GuiCheck.cpp)
+    target_compile_definitions(HadronycheCoreGuiCheck PRIVATE UNICODE _UNICODE NOMINMAX)
+    target_link_libraries(HadronycheCoreGuiCheck PRIVATE hadronyche_gui)
 endif()

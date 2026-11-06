@@ -16,6 +16,11 @@ target_include_directories(hadronyche_params INTERFACE include)
 add_library(hadronyche_vst INTERFACE)
 target_link_libraries(hadronyche_vst INTERFACE hadronyche_params sdk)
 
+# Its source is compiled as part of the plug-in, with the same flags and runtime.
+add_library(hadronyche_gui INTERFACE)
+target_sources(hadronyche_gui INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/PanelEditor.cpp")
+target_link_libraries(hadronyche_gui INTERFACE hadronyche_vst vstgui_support)
+
 if(PROJECT_IS_TOP_LEVEL)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)

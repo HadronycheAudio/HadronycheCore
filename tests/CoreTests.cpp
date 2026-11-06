@@ -5,6 +5,7 @@
 #include "hadronyche/dsp/Gain.h"
 #include "hadronyche/dsp/Smoother.h"
 #include "hadronyche/dsp/Svf.h"
+#include "hadronyche/gui/PanelLayout.h"
 #include "hadronyche/vst/ParamSpec.h"
 
 using namespace Hadronyche;
@@ -163,6 +164,24 @@ void testCurves ()
     check ("not silent unless it says so", !linear.isSilentAtMin);
 }
 
+void testPanelLayout ()
+{
+    std::printf ("[panel-layout]\n");
+
+    // Worked out from the plug-ins' panels as they were before this code was shared. Their panel tests click fixed positions.
+    constexpr Hadronyche::PanelLayout layout {};
+    checkNear ("a section of 6 columns", layout.sectionWidth (6), 408.0);
+    checkNear ("a row of 2 sections", layout.rowWidth ({ 6, 2 }), 2 * 8 + 6 + 408 + 144);
+    checkNear ("a row of 1 section", layout.rowWidth ({ 1 }), 2 * 8 + 78);
+    checkNear ("the panel's height", layout.rowHeight (), 2 * 8 + 112);
+    checkNear ("the knobs' row", layout.knobRow (), 34.0);
+
+    constexpr Hadronyche::PanelLayout taller { 148, 52 };
+    checkNear ("a taller section's panel", taller.rowHeight (), 2 * 8 + 148);
+    checkNear ("and its knobs' row", taller.knobRow (), 60.0);
+    checkNear ("with the other sizes unchanged", taller.columnWidth, 66.0);
+}
+
 } // namespace
 
 int main ()
@@ -173,6 +192,7 @@ int main ()
     testSvf ();
     testDenormals ();
     testCurves ();
+    testPanelLayout ();
 
     std::printf ("\n%d failure(s)\n", gFailures);
     return gFailures == 0 ? 0 : 1;
