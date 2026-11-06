@@ -18,12 +18,14 @@ VST is a registered trademark of Steinberg Media Technologies GmbH.
 
 ## Using it
 
-A plug-in has this as a submodule at `external/hadronychecore`, and adds it after the SDK, so that it builds with the plug-in's flags and runtime:
+A plug-in has this as a submodule at `external/hadronychecore`, and `cmake/HadronychePlugin.cmake` does the rest. It sets up the SDK, adds this library after it so that it builds with the plug-in's flags and runtime, and links it:
 
 ```cmake
-smtg_enable_vst3_sdk()
-add_subdirectory("${HADRONYCHE_CORE_DIR}" "${CMAKE_BINARY_DIR}/hadronychecore")
-target_link_libraries(MyPlugin PRIVATE sdk vstgui_support hadronyche_dsp hadronyche_vst hadronyche_gui)
+set(HADRONYCHE_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/hadronychecore" CACHE PATH "The HadronycheCore library")
+include("${HADRONYCHE_CORE_DIR}/cmake/HadronychePlugin.cmake")
+
+hadronyche_use_vst3_sdk()
+hadronyche_add_plugin(MyPlugin SOURCES src/PluginEntry.cpp src/Processor.cpp)
 ```
 
 A test program links `hadronyche_testhost`, and none of the plug-in's code, so that it can only see what a host can:
@@ -37,7 +39,7 @@ The SDK isn't a submodule here, because a plug-in would then clone it twice.
 
 ## Changing it
 
-A change here can reach the saved projects and the sound of every plug-in using it, and nothing may fail at build time. Each plug-in pins its own version, so that a change only arrives when that plug-in's submodule is moved.
+A change here can reach the saved projects and the sound of every plug-in using it, and nothing may fail at build time. Each plug-in pins its own version, so that a change only arrives when that plug-in's submodule is moved. `AGENTS.md` has the rules, and how to verify a change.
 
 To test the library, which needs an SDK checkout for the parts using the SDK:
 

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # The same version as the plug-ins' submodules.
+  SDK_TAG: v3.8.1_build_84
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.config }}
+    # A pull request from this repository already ran on push, so this only adds runs for forks.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    # This image has Visual Studio 2022, which windows-2025 doesn't.
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fetch the SDK
+        run: git -c core.longpaths=true clone --branch $env:SDK_TAG --depth 1 --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git ${{ runner.temp }}/vst3sdk
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "-DVST3_SDK_DIR=${{ runner.temp }}/vst3sdk"
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }} --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreGuiCheck HadronycheCoreHostCheck -- -m
+
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure
+
+      # Nothing runs it here, but a comparison between builds shouldn't be the first to find out that it's broken.
+      - name: Build the null test tool
+        run: |
+          cmake -S tools/nulltest -B build-nulltest -G "Visual Studio 17 2022" -A x64 "-DVST3_SDK_DIR=${{ runner.temp }}/vst3sdk"
+          cmake --build build-nulltest --config ${{ matrix.config }} -- -m
