@@ -22,6 +22,34 @@ target_sources(hadronyche_gui INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/Pan
 target_link_libraries(hadronyche_gui INTERFACE hadronyche_vst vstgui_support)
 
 if(PROJECT_IS_TOP_LEVEL)
+    # The parts using the SDK need a checkout of it, at the same version as the plug-ins. A plug-in sets this itself.
+    set(VST3_SDK_DIR "" CACHE PATH "A VST3 SDK checkout, to also test the parts that use it")
+endif()
+
+# For test programs, which load a built plug-in and link none of it, or of the SDK beyond these few files.
+if(VST3_SDK_DIR)
+    add_library(hadronyche_testhost INTERFACE)
+    target_sources(hadronyche_testhost INTERFACE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/testhost/Host.cpp"
+        "${VST3_SDK_DIR}/pluginterfaces/base/funknown.cpp"
+        "${VST3_SDK_DIR}/pluginterfaces/base/coreiids.cpp"
+        "${VST3_SDK_DIR}/pluginterfaces/base/ustring.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/common/memorystream.cpp"
+    )
+    target_include_directories(hadronyche_testhost INTERFACE "${VST3_SDK_DIR}")
+    target_compile_definitions(hadronyche_testhost INTERFACE UNICODE _UNICODE NOMINMAX)
+    target_link_libraries(hadronyche_testhost INTERFACE hadronyche_params user32 gdi32)
+endif()
+
+# One CTest test per test in the program, so that a single one can be run with ctest -R.
+function(hadronyche_add_host_tests program plugin)
+    foreach(test_name ${ARGN})
+        add_test(NAME ${test_name} COMMAND ${program} "$<TARGET_FILE:${plugin}>" ${test_name})
+        set_tests_properties(${test_name} PROPERTIES TIMEOUT 300)
+    endforeach()
+endfunction()
+
+if(PROJECT_IS_TOP_LEVEL)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_EXTENSIONS OFF)

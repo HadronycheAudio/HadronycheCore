@@ -14,6 +14,7 @@ VST is a registered trademark of Steinberg Media Technologies GmbH.
 | `hadronyche_params` | `hadronyche/vst/ParamSpec.h` | Parameter descriptions and their curves. No SDK needed, so that a plug-in's tests can use its parameter IDs |
 | `hadronyche_vst` | `hadronyche/vst/` | `SpecParameter`, `ParamStore`, saved parameter state |
 | `hadronyche_gui` | `hadronyche/gui/` | `PanelEditor`, a plug-in window built in code from sections, knobs, menus and toggles that follow their parameters |
+| `hadronyche_testhost` | `hadronyche/testhost/` | A minimal VST 3 host for test programs, which load the built plug-in and drive it the way a host does, with test signals and measurements. Needs `VST3_SDK_DIR` |
 
 ## Using it
 
@@ -23,6 +24,13 @@ A plug-in has this as a submodule at `external/hadronychecore`, and adds it afte
 smtg_enable_vst3_sdk()
 add_subdirectory("${HADRONYCHE_CORE_DIR}" "${CMAKE_BINARY_DIR}/hadronychecore")
 target_link_libraries(MyPlugin PRIVATE sdk vstgui_support hadronyche_dsp hadronyche_vst hadronyche_gui)
+```
+
+A test program links `hadronyche_testhost`, and none of the plug-in's code, so that it can only see what a host can:
+
+```cmake
+target_link_libraries(MyPluginTests PRIVATE hadronyche_testhost)
+hadronyche_add_host_tests(MyPluginTests MyPlugin first-test second-test)
 ```
 
 The SDK isn't a submodule here, because a plug-in would then clone it twice.
@@ -35,7 +43,7 @@ To test the library, which needs an SDK checkout for the parts using the SDK:
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DVST3_SDK_DIR=<path to a VST3 SDK>
-cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreGuiCheck
+cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreGuiCheck HadronycheCoreHostCheck
 ctest --test-dir build -C Release --output-on-failure
 ```
 

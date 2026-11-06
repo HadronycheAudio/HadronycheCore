@@ -6,6 +6,7 @@
 #include "hadronyche/dsp/Smoother.h"
 #include "hadronyche/dsp/Svf.h"
 #include "hadronyche/gui/PanelLayout.h"
+#include "hadronyche/testhost/Signals.h"
 #include "hadronyche/vst/ParamSpec.h"
 
 using namespace Hadronyche;
@@ -182,6 +183,41 @@ void testPanelLayout ()
     checkNear ("with the other sizes unchanged", taller.columnWidth, 66.0);
 }
 
+void testSignals ()
+{
+    std::printf ("[signals]\n");
+    using namespace Hadronyche::TestHost;
+
+    const Samples square { 1.0f, -1.0f, 1.0f, -1.0f };
+    checkNear ("rms", rms (square), 1.0);
+    checkNear ("rms from a position", rms ({ 0.0f, 0.0f, 0.5f, -0.5f }, 2), 0.5);
+    checkNear ("rms of nothing", rms ({}), 0.0);
+    checkNear ("peak", peak ({ 0.25f, -0.75f, 0.5f }), 0.75);
+    checkNear ("peak from a position", peak ({ 0.25f, -0.75f, 0.5f }, 2), 0.5);
+
+    checkNear ("db of 1", db (1.0), 0.0);
+    checkNear ("db of 0.1", db (0.1), -20.0);
+    checkNear ("db of nothing has a floor", db (0.0), -240.0);
+
+    check ("slice", slice ({ 1.0f, 2.0f, 3.0f, 4.0f }, 1, 2) == Samples { 2.0f, 3.0f });
+    check ("slice stops at the end", slice ({ 1.0f, 2.0f }, 1, 5) == Samples { 2.0f });
+    check ("concatenate", concatenate ({ 1.0f }, { 2.0f }) == Samples { 1.0f, 2.0f });
+    check ("add", add ({ 1.0f, 2.0f }, { 0.5f }) == Samples { 1.5f, 2.0f });
+    check ("finite", isFinite ({ 1.0f, 0.0f }));
+    check ("not finite", !isFinite ({ 1.0f, std::nanf ("") }));
+
+    const auto tone = makeTones ({ { 1000.0, 0.5 } }, 48000);
+    checkNear ("a tone's rms", rms (tone), 0.5 / std::sqrt (2.0), 1e-6);
+    checkNear ("a tone's level", toneLevel (tone, 1000.0), 0.5, 1e-6);
+    checkNear ("and away from it", toneLevel (tone, 3000.0), 0.0, 1e-6);
+    checkNear ("two tones add", toneLevel (makeTones ({ { 1000.0, 0.5 }, { 2000.0, 0.25 } }, 48000), 2000.0), 0.25, 1e-6);
+
+    // The sequence itself, by hand, since tests have written their limits around it.
+    const auto noise = makeNoise (1.0, 2);
+    check ("noise is repeatable", noise == makeNoise (1.0, 2));
+    checkNear ("noise's first value", noise[0], -0.366812933, 1e-6);
+}
+
 } // namespace
 
 int main ()
@@ -193,6 +229,7 @@ int main ()
     testDenormals ();
     testCurves ();
     testPanelLayout ();
+    testSignals ();
 
     std::printf ("\n%d failure(s)\n", gFailures);
     return gFailures == 0 ? 0 : 1;

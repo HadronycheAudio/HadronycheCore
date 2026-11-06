@@ -5,8 +5,6 @@ add_executable(HadronycheCoreTests CoreTests.cpp Check.h)
 target_link_libraries(HadronycheCoreTests PRIVATE hadronyche_dsp hadronyche_params)
 add_test(NAME core COMMAND HadronycheCoreTests)
 
-# The parts using the SDK need a checkout of it, at the same version as the plug-ins.
-set(VST3_SDK_DIR "" CACHE PATH "A VST3 SDK checkout, to also test the parts that use it")
 if(VST3_SDK_DIR)
     option(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES "Build the VST3 SDK example plug-ins" OFF)
     option(SMTG_ENABLE_VST3_HOSTING_EXAMPLES "Build the VST3 SDK example hosts" OFF)
@@ -24,4 +22,8 @@ if(VST3_SDK_DIR)
     add_library(HadronycheCoreGuiCheck STATIC GuiCheck.cpp)
     target_compile_definitions(HadronycheCoreGuiCheck PRIVATE UNICODE _UNICODE NOMINMAX)
     target_link_libraries(HadronycheCoreGuiCheck PRIVATE hadronyche_gui)
+
+    # The same goes for the test host, which the plug-ins' test programs are built on.
+    add_library(HadronycheCoreHostCheck STATIC HostCheck.cpp)
+    target_link_libraries(HadronycheCoreHostCheck PRIVATE hadronyche_testhost)
 endif()
