@@ -66,6 +66,7 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 - **A plug-in's `CMAKE_OSX_DEPLOYMENT_TARGET` decides which Macs it runs on,** and a build defaults to the machine's own version. `tools/macos/test-installer.sh` reads it from the binaries, because nothing else would notice.
 - **Keep `SMTG_USE_STATIC_CRT` on, in `cmake/HadronychePlugin.cmake`.** Without it, a plug-in fails to load on PCs without Microsoft's runtime, and neither the tests nor CI would notice, because that runtime is on those machines. Check a change there with `dumpbin /dependents` on a Release DLL from a fresh build folder, because a cached value overrides the default.
 - **`hadronyche_use_vst3_sdk` has to stay a macro.** The SDK's flags and targets have to reach the plug-in's own scope.
+- **A Linux release is built in the oldest container that CI uses, not on the runner.** A binary needs a glibc as new as the one it's built against, and only an older distribution would notice. `tools/linux/test-tarball.sh` reads this from the binary, along with the static C++ runtime and the three exported symbols.
 - **The library is added after the SDK,** so that it builds with the plug-in's flags and runtime. `hadronyche_gui` and `hadronyche_testhost` have their sources compiled as part of whatever links them for the same reason.
 - **The SDK isn't a submodule here,** because a plug-in would then clone it twice.
 - **The parameter headers mustn't need the SDK.** A plug-in's tests include its parameters without linking it.
@@ -86,7 +87,7 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 | `hadronyche_gui` | SDK, VSTGUI | `PanelEditor` |
 | `hadronyche_testhost` | SDK headers | A VST3 host for test programs, with signals, measurements and a runner, and on Linux `testPanelOpens` |
 
-`tools/macos/` builds a plug-in's `.pkg` installer and tests it on CI, and `tools/nulltest/` compares two builds, on Windows and Linux.
+`tools/macos/` builds a plug-in's `.pkg` installer and tests it on CI, `tools/linux/` does the same for its tarball, and `tools/nulltest/` compares two builds, on Windows and Linux.
 
 - **`PanelEditor`:** a plug-in provides `buildPanel`, and optionally `onSync` and `onClose`. A control's tag is its parameter's ID, and tags from the parameter count upwards are the plug-in's own, which only `valueChanged` handles.
 - **The test host:** a plug-in's `Plug` derives from `PlugBase`, and adds what its own features need. Measurements that differ between plug-ins stay in them, such as each `measureFrequency`.

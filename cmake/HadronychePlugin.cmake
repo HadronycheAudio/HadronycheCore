@@ -67,6 +67,12 @@ macro(hadronyche_use_vst3_sdk)
         add_compile_options(-fno-fast-math -ffp-contract=off)
     endif()
 
+    # Linking the C++ runtime statically means a plug-in built on one distribution doesn't need that distribution's
+    # newer runtime on another. As with SMTG_USE_STATIC_CRT, nothing would notice on the machine that built it.
+    if(LINUX)
+        add_link_options(-static-libstdc++ -static-libgcc)
+    endif()
+
     # After the SDK, so that the library builds with the same flags and runtime as the plug-in.
     add_subdirectory("${HADRONYCHE_CORE_DIR}" "${CMAKE_BINARY_DIR}/hadronychecore")
 endmacro()
@@ -119,6 +125,11 @@ function(hadronyche_add_plugin name)
         $<$<PLATFORM_ID:Windows>:NOMINMAX>
     )
     target_link_libraries(${name} PRIVATE sdk vstgui_support hadronyche_dsp hadronyche_vst hadronyche_gui)
+
+    # Only the entry points are for a host, and anything else exported could clash with it or with other plug-ins.
+    if(LINUX)
+        target_link_options(${name} PRIVATE "-Wl,--version-script=${HADRONYCHE_CORE_DIR}/cmake/linux-exports.map")
+    endif()
 
     if(APPLE)
         string(TOLOWER "${name}" lower_name)

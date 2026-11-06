@@ -1,0 +1,9 @@
+# What a VST3 module has to export on Linux. Nothing else should be visible to a host or to other plug-ins.
+{
+    global:
+        GetPluginFactory;
+        ModuleEntry;
+        ModuleExit;
+    local:
+        *;
+};

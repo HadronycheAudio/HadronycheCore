@@ -5,8 +5,14 @@
 # but nothing here builds that library, so the plug-ins don't link them. The tests need xvfb where there's no display.
 set -e
 
-sudo apt-get update
-sudo apt-get install -y \
+# A container on CI runs as root, and has no sudo.
+sudo=sudo
+if [ "$(id -u)" = 0 ]; then
+    sudo=
+fi
+
+$sudo apt-get update
+$sudo apt-get install -y \
     ninja-build pkg-config \
     libx11-dev libxcb1-dev libxcb-util-dev libxcb-cursor-dev libxcb-keysyms1-dev libxcb-xkb-dev \
     libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev wayland-protocols \
