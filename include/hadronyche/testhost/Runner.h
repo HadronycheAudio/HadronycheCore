@@ -4,7 +4,10 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cwchar>
+#include <string>
+#include <vector>
 
 namespace Hadronyche {
 namespace TestHost {
@@ -29,23 +32,25 @@ struct TestProgram
     void (*afterFinishing) () { nullptr };
 };
 
-// The main of a test program:
+// The main of a test program, through HADRONYCHE_TEST_MAIN:
 //
-//   <program> <path to the plug-in's DLL> [test name]
+//   <program> <path to the plug-in's binary> [test name]
 //   <program> --list
+//
+// Everything prints with printf, because on macOS a stream refuses narrow output after wide output.
 inline int runTests (int argc, wchar_t** argv, const TestProgram& program)
 {
     if (argc >= 2 && std::wcscmp (argv[1], L"--list") == 0)
     {
         for (size_t i = 0; i < program.testCount; ++i)
-            std::wprintf (L"%ls\n", program.tests[i].name);
-        std::wprintf (L"cpu\n");
+            std::printf ("%ls\n", program.tests[i].name);
+        std::printf ("cpu\n");
         return 0;
     }
 
     if (argc < 2)
     {
-        std::printf ("Usage: %s <path to the plug-in's DLL> [test name]\n", program.name);
+        std::printf ("Usage: %s <path to the plug-in's binary> [test name]\n", program.name);
         return 2;
     }
 
@@ -54,7 +59,7 @@ inline int runTests (int argc, wchar_t** argv, const TestProgram& program)
 
     if (!loadPlugin (argv[1]))
     {
-        std::wprintf (L"Could not load the plug-in: %ls\n", argv[1]);
+        std::printf ("Could not load the plug-in: %ls\n", argv[1]);
         if (program.afterFinishing)
             program.afterFinishing ();
         return 2;
@@ -76,7 +81,7 @@ inline int runTests (int argc, wchar_t** argv, const TestProgram& program)
             continue;
 
         foundTest = true;
-        std::wprintf (L"[%ls]\n", test.name);
+        std::printf ("[%ls]\n", test.name);
         std::fflush (stdout);
         test.function ();
     }
@@ -87,7 +92,7 @@ inline int runTests (int argc, wchar_t** argv, const TestProgram& program)
 
     if (!foundTest)
     {
-        std::wprintf (L"No test named %ls. Use --list to see them.\n", filter);
+        std::printf ("No test named %ls. Use --list to see them.\n", filter);
         return 2;
     }
 
@@ -95,5 +100,27 @@ inline int runTests (int argc, wchar_t** argv, const TestProgram& program)
     return getFailureCount () == 0 ? 0 : 1;
 }
 
+inline int runTests (int argc, char** argv, const TestProgram& program)
+{
+    std::vector<std::wstring> wide;
+    std::vector<wchar_t*> arguments;
+    for (int i = 0; i < argc; ++i)
+    {
+        std::wstring argument (std::strlen (argv[i]) + 1, L'\0');
+        argument.resize (std::mbstowcs (argument.data (), argv[i], argument.size ()));
+        wide.push_back (argument);
+    }
+    for (auto& argument : wide)
+        arguments.push_back (argument.data ());
+    return runTests (argc, arguments.data (), program);
+}
+
 } // namespace TestHost
 } // namespace Hadronyche
+
+// wmain on Windows, where arguments can be any path, and main elsewhere.
+#if defined(_WIN32)
+#define HADRONYCHE_TEST_MAIN int wmain (int argc, wchar_t** argv)
+#else
+#define HADRONYCHE_TEST_MAIN int main (int argc, char** argv)
+#endif

@@ -10,7 +10,7 @@ It only holds what more than one plug-in needs, and it isn't a framework. Single
 
 ## Commands
 
-The only supported platform is Windows x64 with Visual Studio 2022 and CMake 3.25 or newer.
+Windows x64 with Visual Studio 2022 and CMake 3.25 or newer is where this is developed. macOS, on Intel and Apple Silicon with Xcode, is built and tested by CI.
 
 ```powershell
 # Configure. The parts using the SDK need a checkout of it, at the same version as the plug-ins.
@@ -58,6 +58,10 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 
 ### Building
 
+- **The SDK's `-ffast-math -ffp-contract=fast` stay off on macOS,** through the flags after it in `hadronyche_use_vst3_sdk`. With them, the compiler may remove every `std::isfinite`, and on Apple Silicon `2 * (1 - 100 / 100)` comes out at about -4e-17, so that fully wet effects let through a trace of their dry signal. The plug-ins' tests failed on exactly this.
+- **Never change the Audio Unit manufacturer code `Hdrn`.** Hosts use it to find plug-ins in saved projects.
+- **Stay on AudioUnitSDK 1.1.0 unless the SDK's wrapper moves on.** It's the first with its headers where the wrapper looks for them, and later ones need newer C++.
+- **A plug-in's `CMAKE_OSX_DEPLOYMENT_TARGET` decides which Macs it runs on,** and a build defaults to the machine's own version. `tools/macos/test-installer.sh` reads it from the binaries, because nothing else would notice.
 - **Keep `SMTG_USE_STATIC_CRT` on, in `cmake/HadronychePlugin.cmake`.** Without it, a plug-in fails to load on PCs without Microsoft's runtime, and neither the tests nor CI would notice, because that runtime is on those machines. Check a change there with `dumpbin /dependents` on a Release DLL from a fresh build folder, because a cached value overrides the default.
 - **`hadronyche_use_vst3_sdk` has to stay a macro.** The SDK's flags and targets have to reach the plug-in's own scope.
 - **The library is added after the SDK,** so that it builds with the plug-in's flags and runtime. `hadronyche_gui` and `hadronyche_testhost` have their sources compiled as part of whatever links them for the same reason.
@@ -79,6 +83,8 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 | `hadronyche_vst` | SDK | `SpecParameter`, `ParamStore`, saved parameter state |
 | `hadronyche_gui` | SDK, VSTGUI | `PanelEditor` |
 | `hadronyche_testhost` | SDK headers | A VST3 host for test programs, with signals, measurements and a runner |
+
+`tools/macos/` builds a plug-in's `.pkg` installer and tests it on CI, and `tools/nulltest/` compares two builds, on Windows only so far.
 
 - **`PanelEditor`:** a plug-in provides `buildPanel`, and optionally `onSync` and `onClose`. A control's tag is its parameter's ID, and tags from the parameter count upwards are the plug-in's own, which only `valueChanged` handles.
 - **The test host:** a plug-in's `Plug` derives from `PlugBase`, and adds what its own features need. Measurements that differ between plug-ins stay in them, such as each `measureFrequency`.

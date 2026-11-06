@@ -5,11 +5,17 @@
 #include "pluginterfaces/vst/ivsthostapplication.h"
 #include "public.sdk/source/common/memorystream.h"
 
+#if defined(_WIN32)
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <map>
 #include <string>
 
@@ -150,7 +156,11 @@ private:
 };
 
 Host gHost;
+#if defined(_WIN32)
 HMODULE gModule = nullptr;
+#elif defined(__APPLE__)
+CFBundleRef gBundle = nullptr;
+#endif
 IPluginFactory* gFactory = nullptr;
 bool (*gExitDll) () = nullptr;
 TUID gComponentId;
@@ -171,16 +181,47 @@ public:
     std::vector<ValueQueue> queues;
 };
 
-bool loadPlugin (const wchar_t* path)
+namespace {
+
+// Calls the plug-in's entry point and returns its factory function.
+GetFactoryProc enterPlugin (const wchar_t* path)
 {
+#if defined(_WIN32)
     gModule = LoadLibraryW (path);
     if (!gModule)
-        return false;
+        return nullptr;
 
     auto initDll = reinterpret_cast<bool (*) ()> (GetProcAddress (gModule, "InitDll"));
     gExitDll = reinterpret_cast<bool (*) ()> (GetProcAddress (gModule, "ExitDll"));
     auto getPluginFactory = reinterpret_cast<GetFactoryProc> (GetProcAddress (gModule, "GetPluginFactory"));
-    if (!initDll || !gExitDll || !getPluginFactory || !initDll ())
+    return initDll && gExitDll && getPluginFactory && initDll () ? getPluginFactory : nullptr;
+#elif defined(__APPLE__)
+    // The path is to the binary, as CMake gives it: <name>.vst3/Contents/MacOS/<name>.
+    std::string file (std::wcslen (path) * 4 + 1, '\0');
+    file.resize (std::wcstombs (file.data (), path, file.size ()));
+    for (int level = 0; level < 3; ++level)
+        file.erase (file.rfind ('/'));
+
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation (nullptr, reinterpret_cast<const UInt8*> (file.data ()), static_cast<CFIndex> (file.size ()), true);
+    gBundle = url ? CFBundleCreate (nullptr, url) : nullptr;
+    if (url)
+        CFRelease (url);
+    if (!gBundle || !CFBundleLoadExecutable (gBundle))
+        return nullptr;
+
+    auto bundleEntry = reinterpret_cast<bool (*) (CFBundleRef)> (CFBundleGetFunctionPointerForName (gBundle, CFSTR ("bundleEntry")));
+    gExitDll = reinterpret_cast<bool (*) ()> (CFBundleGetFunctionPointerForName (gBundle, CFSTR ("bundleExit")));
+    auto getPluginFactory = reinterpret_cast<GetFactoryProc> (CFBundleGetFunctionPointerForName (gBundle, CFSTR ("GetPluginFactory")));
+    return bundleEntry && gExitDll && getPluginFactory && bundleEntry (gBundle) ? getPluginFactory : nullptr;
+#endif
+}
+
+} // namespace
+
+bool loadPlugin (const wchar_t* path)
+{
+    const auto getPluginFactory = enterPlugin (path);
+    if (!getPluginFactory)
         return false;
 
     gFactory = getPluginFactory ();
@@ -200,7 +241,11 @@ void unloadPlugin ()
 {
     gFactory->release ();
     gExitDll ();
+#if defined(_WIN32)
     FreeLibrary (gModule);
+#elif defined(__APPLE__)
+    CFRelease (gBundle);
+#endif
 }
 
 IPluginFactory* getFactory ()

@@ -12,10 +12,16 @@ if(VST3_SDK_DIR)
     option(SMTG_CREATE_PLUGIN_LINK "Symlink the built plug-in into the VST3 folder" OFF)
     add_subdirectory("${VST3_SDK_DIR}" "${CMAKE_BINARY_DIR}/vst3sdk" EXCLUDE_FROM_ALL)
     smtg_enable_vst3_sdk()
+    if(XCODE)
+        add_compile_options(-fno-fast-math -ffp-contract=off)
+    endif()
 
     add_executable(HadronycheCoreVstTests VstTests.cpp Check.h "${VST3_SDK_DIR}/public.sdk/source/common/memorystream.cpp")
     target_compile_definitions(HadronycheCoreVstTests PRIVATE UNICODE _UNICODE NOMINMAX)
     target_link_libraries(HadronycheCoreVstTests PRIVATE hadronyche_vst)
+    if(APPLE)
+        target_link_libraries(HadronycheCoreVstTests PRIVATE "-framework CoreFoundation")
+    endif()
     add_test(NAME core-vst COMMAND HadronycheCoreVstTests)
 
     # Only built. Driving a real panel takes a real plug-in, so the plug-ins' panel tests cover what it does.

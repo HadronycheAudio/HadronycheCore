@@ -14,8 +14,10 @@
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
+#include <thread>
 #include <vector>
 
 namespace Hadronyche {
@@ -29,6 +31,11 @@ struct Stereo
     Samples right;
     std::vector<bool> blockSilent; // The silence flags the plug-in set, per block.
 };
+
+inline void sleepMilliseconds (int milliseconds)
+{
+    std::this_thread::sleep_for (std::chrono::milliseconds (milliseconds));
+}
 
 // Loading the plug-in.
 bool loadPlugin (const wchar_t* path);

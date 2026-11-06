@@ -46,3 +46,30 @@ jobs:
         run: |
           cmake -S tools/nulltest -B build-nulltest -G "Visual Studio 17 2022" -A x64 "-DVST3_SDK_DIR=${{ runner.temp }}/vst3sdk"
           cmake --build build-nulltest --config ${{ matrix.config }} -- -m
+
+  macos:
+    name: ${{ matrix.runner }}
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Apple Silicon and Intel, because the denormal code and the rounding differ between them.
+        runner: [macos-15, macos-15-intel]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fetch the SDK
+        run: git clone --branch "$SDK_TAG" --depth 1 --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git "$RUNNER_TEMP/vst3sdk"
+
+      - name: Configure
+        run: cmake -S . -B build -G Xcode "-DVST3_SDK_DIR=$RUNNER_TEMP/vst3sdk" "-DSMTG_CODE_SIGN_IDENTITY_MAC=-" "-DSMTG_XCODE_OTHER_CODE_SIGNING_FLAGS="
+
+      - name: Build
+        run: cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreGuiCheck HadronycheCoreHostCheck
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

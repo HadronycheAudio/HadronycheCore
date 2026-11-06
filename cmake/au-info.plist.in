@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundlePackageType</key>
+	<string>BNDL</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>@HADRONYCHE_AU_VERSION_STRING@</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@HADRONYCHE_AU_VERSION_STRING@</string>
+	<key>AudioComponents</key>
+	<array>
+		<dict>
+			<key>factoryFunction</key>
+			<string>AUWrapperFactory</string>
+			<key>description</key>
+			<string>@HADRONYCHE_AU_NAME@</string>
+			<key>manufacturer</key>
+			<string>@HADRONYCHE_AU_MANUFACTURER@</string>
+			<key>name</key>
+			<string>Hadronyche: @HADRONYCHE_AU_NAME@</string>
+			<key>subtype</key>
+			<string>@HADRONYCHE_AU_SUBTYPE@</string>
+			<key>type</key>
+			<string>@HADRONYCHE_AU_TYPE@</string>
+			<key>version</key>
+			<integer>@HADRONYCHE_AU_VERSION@</integer>
+		</dict>
+	</array>
+	<key>AudioUnit SupportedNumChannels</key>
+	<array>
+		<dict>
+			<key>Outputs</key>
+			<string>2</string>
+			<key>Inputs</key>
+			<string>@HADRONYCHE_AU_INPUTS@</string>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -2,7 +2,7 @@
 
 Code shared by the Hadronyche VST® 3 plug-ins: [DiffusionDelay](https://github.com/HadronycheAudio/DiffusionDelay), [LoopTexturer](https://github.com/HadronycheAudio/LoopTexturer), [PartialResynth](https://github.com/HadronycheAudio/PartialResynth) and [RabidPhatt](https://github.com/HadronycheAudio/RabidPhatt).
 
-It isn't a framework, and it only holds what more than one plug-in needs. It's for Windows x64 with Visual Studio 2022, CMake 3.25 or newer and the VST 3 SDK, in C++17.
+It isn't a framework, and it only holds what more than one plug-in needs. It's for Windows x64 with Visual Studio 2022, and macOS on Intel and Apple Silicon with Xcode, using CMake 3.25 or newer and the VST 3 SDK, in C++17.
 
 VST is a registered trademark of Steinberg Media Technologies GmbH.
 
@@ -25,7 +25,7 @@ set(HADRONYCHE_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/hadronychecore" CA
 include("${HADRONYCHE_CORE_DIR}/cmake/HadronychePlugin.cmake")
 
 hadronyche_use_vst3_sdk()
-hadronyche_add_plugin(MyPlugin SOURCES src/PluginEntry.cpp src/Processor.cpp)
+hadronyche_add_plugin(MyPlugin AU_TYPE aufx AU_SUBTYPE MyPl SOURCES src/PluginEntry.cpp src/Processor.cpp)
 ```
 
 A test program links `hadronyche_testhost`, and none of the plug-in's code, so that it can only see what a host can:
@@ -36,6 +36,8 @@ hadronyche_add_host_tests(MyPluginTests MyPlugin first-test second-test)
 ```
 
 The SDK isn't a submodule here, because a plug-in would then clone it twice.
+
+On macOS, this also fetches Apple's AudioUnitSDK, builds an Audio Unit target called `MyPlugin-au` with the SDK's wrapper, and `tools/macos/` builds and tests a `.pkg` installer. A plug-in has to set `CMAKE_OSX_DEPLOYMENT_TARGET` before its `project ()`.
 
 ## Changing it
 
