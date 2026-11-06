@@ -3,13 +3,117 @@
 #include "pluginterfaces/base/ustring.h"
 #include "public.sdk/source/vst/vsteditcontroller.h"
 
+#if SMTG_OS_LINUX
+#include "public.sdk/source/vst/vstgui_linux_runloop_support.h"
+#include "vstgui/lib/platform/linux/cairographicscontext.h"
+#include "vstgui/lib/platform/linux/linuxfactory.h"
+#include "vstgui/lib/platform/linux/x11platform.h"
+#include "vstgui/lib/platform/platform_x11.h"
+
+#include <cairo/cairo-xcb.h>
+#include <xcb/xcb.h>
+#endif
+
 #include <cmath>
+#include <cstring>
 
 using namespace VSTGUI;
 
 namespace Hadronyche {
 
 namespace {
+
+#if SMTG_OS_LINUX
+// VSTGUI only connects to the X server for a frame given a run loop, and that run loop already has to be installed.
+// Without a configuration, the frame still opens and crashes on its first call to the server. A host provides the run
+// loop through its plug frame, or through its context, which the SDK has already handled by the time a panel opens.
+//
+// VSTGUI has one run loop and one connection per process, so a run loop that came from a plug frame serves every panel
+// until the last one closes, and is let go of then. It would otherwise outlive that frame, and later panels would run
+// on a loop no longer serviced.
+int gOpenPanels = 0;
+bool gRunLoopIsFromPlugFrame = false;
+
+// Cairo remembers each connection, and VSTGUI's X11 code disconnects without telling it. If a later connection lands on
+// the same address, Cairo mistakes it for the old one and aborts, the next time a panel opens. There's no way to do this
+// between the last frame closing and VSTGUI disconnecting, so endConnection holds the connection open across that.
+void finishCairoDevice (xcb_connection_t* connection)
+{
+    const xcb_screen_t* screen = xcb_setup_roots_iterator (xcb_get_setup (connection)).data;
+
+    xcb_visualtype_t* visual = nullptr;
+    for (auto depths = xcb_screen_allowed_depths_iterator (screen); depths.rem > 0 && !visual; xcb_depth_next (&depths))
+    {
+        for (auto visuals = xcb_depth_visuals_iterator (depths.data); visuals.rem > 0 && !visual; xcb_visualtype_next (&visuals))
+        {
+            if (visuals.data->visual_id == screen->root_visual)
+                visual = visuals.data;
+        }
+    }
+    if (!visual)
+        return;
+
+    // There's one device per connection, so any surface leads to it.
+    cairo_surface_t* surface = cairo_xcb_surface_create (connection, screen->root, visual, 1, 1);
+    cairo_device_t* device = cairo_device_reference (cairo_surface_get_device (surface));
+    cairo_surface_destroy (surface);
+
+    getPlatformFactory ().asLinuxFactory ()->getCairoGraphicsDeviceFactory ().removeDevice (device);
+    cairo_device_finish (device);
+    cairo_device_destroy (device);
+}
+
+void endConnection ()
+{
+    finishCairoDevice (X11::RunLoop::instance ().getXcbConnection ());
+    X11::RunLoop::exit ();
+
+    if (gRunLoopIsFromPlugFrame)
+    {
+        getPlatformFactory ().asLinuxFactory ()->setRunLoop (nullptr);
+        gRunLoopIsFromPlugFrame = false;
+    }
+}
+
+bool openFrame (CFrame* frame, void* parent, const PlatformType& platformType, Steinberg::IPlugFrame* plugFrame)
+{
+    const auto* factory = getPlatformFactory ().asLinuxFactory ();
+    if (!factory->getRunLoop ())
+    {
+        if (!Steinberg::Linux::setupVSTGUIRunloop (plugFrame))
+            return false;
+        gRunLoopIsFromPlugFrame = true;
+    }
+
+    if (gOpenPanels == 0)
+        X11::RunLoop::init ();
+
+    X11::FrameConfig config;
+    config.runLoop = factory->getRunLoop ();
+    if (frame->open (parent, platformType, &config))
+    {
+        ++gOpenPanels;
+        return true;
+    }
+
+    if (gOpenPanels == 0)
+        endConnection ();
+    return false;
+}
+
+void frameClosed ()
+{
+    if (--gOpenPanels == 0)
+        endConnection ();
+}
+#else
+bool openFrame (CFrame* frame, void* parent, const PlatformType& platformType, Steinberg::IPlugFrame*)
+{
+    return frame->open (parent, platformType);
+}
+
+void frameClosed () {}
+#endif
 
 // A titled background box. Controls are added on top of it.
 class SectionView : public CView
@@ -154,6 +258,16 @@ void PanelEditor::addToggle (const CRect& area, Steinberg::Vst::ParamID id, cons
     _bindings.push_back ({ toggle, nullptr });
 }
 
+#if SMTG_OS_LINUX
+// A Wayland surface needs more from the host than a panel gets, so a host has to use X11.
+Steinberg::tresult PLUGIN_API PanelEditor::isPlatformTypeSupported (Steinberg::FIDString type)
+{
+    if (std::strcmp (type, Steinberg::kPlatformTypeWaylandSurfaceID) == 0)
+        return Steinberg::kInvalidArgument;
+    return VSTGUIEditor::isPlatformTypeSupported (type);
+}
+#endif
+
 bool PLUGIN_API PanelEditor::open (void* parent, const PlatformType& platformType)
 {
     Steinberg::ViewRect size = getRect ();
@@ -165,7 +279,7 @@ bool PLUGIN_API PanelEditor::open (void* parent, const PlatformType& platformTyp
     _nextSectionX = _layout.margin;
     buildPanel ();
 
-    if (!frame->open (parent, platformType))
+    if (!openFrame (frame, parent, platformType, plugFrame))
     {
         _bindings.clear ();
         frame->forget ();
@@ -190,6 +304,7 @@ void PLUGIN_API PanelEditor::close ()
     {
         frame->close (); // This also releases the frame.
         frame = nullptr;
+        frameClosed ();
     }
 }
 

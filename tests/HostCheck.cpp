@@ -1,6 +1,8 @@
 #include "hadronyche/testhost/Host.h"
 #if defined(_WIN32)
 #include "hadronyche/testhost/Panel.h"
+#elif defined(__linux__)
+#include "hadronyche/testhost/PanelOpens.h"
 #endif
 #include "hadronyche/testhost/Runner.h"
 

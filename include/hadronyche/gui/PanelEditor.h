@@ -33,6 +33,9 @@ public:
     PanelEditor (Steinberg::Vst::EditController* controller, int width, int height, SpecGetter getSpec, Steinberg::Vst::ParamID paramCount,
                  const PanelTheme& theme, const PanelLayout& layout);
 
+#if SMTG_OS_LINUX
+    Steinberg::tresult PLUGIN_API isPlatformTypeSupported (Steinberg::FIDString type) SMTG_OVERRIDE;
+#endif
     bool PLUGIN_API open (void* parent, const VSTGUI::PlatformType& platformType) SMTG_OVERRIDE;
     void PLUGIN_API close () SMTG_OVERRIDE;
 

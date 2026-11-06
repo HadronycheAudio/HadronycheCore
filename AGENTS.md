@@ -55,6 +55,8 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 ### Panels
 
 - **Don't change what `PanelLayout`'s defaults or `PanelEditor` draw.** The plug-ins' panel tests click fixed positions, and users see the result. A plug-in's own colours and sizes are passed in.
+- **On Linux, a panel's frame has to open with a run loop in an `X11::FrameConfig`.** Without one, VSTGUI never connects to the X server, and the panel crashes as it opens, in any host. Only `panel-opens` would notice, because the tests and the validator never open a panel otherwise.
+- **On Linux, `PanelEditor` has to finish Cairo's device before VSTGUI disconnects from the X server,** which VSTGUI doesn't do itself. Otherwise reopening a panel can abort the host, depending on where the next connection lands in memory.
 
 ### Building
 
@@ -82,7 +84,7 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 | `hadronyche_params` | Nothing | `ParamSpec`, its curves and conversions |
 | `hadronyche_vst` | SDK | `SpecParameter`, `ParamStore`, saved parameter state |
 | `hadronyche_gui` | SDK, VSTGUI | `PanelEditor` |
-| `hadronyche_testhost` | SDK headers | A VST3 host for test programs, with signals, measurements and a runner |
+| `hadronyche_testhost` | SDK headers | A VST3 host for test programs, with signals, measurements and a runner, and on Linux `testPanelOpens` |
 
 `tools/macos/` builds a plug-in's `.pkg` installer and tests it on CI, and `tools/nulltest/` compares two builds, on Windows and Linux.
 
