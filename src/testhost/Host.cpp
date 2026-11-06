@@ -9,6 +9,8 @@
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <CoreFoundation/CoreFoundation.h>
+#elif defined(__linux__)
+#include <dlfcn.h>
 #endif
 
 #include <algorithm>
@@ -160,6 +162,8 @@ Host gHost;
 HMODULE gModule = nullptr;
 #elif defined(__APPLE__)
 CFBundleRef gBundle = nullptr;
+#elif defined(__linux__)
+void* gLibrary = nullptr;
 #endif
 IPluginFactory* gFactory = nullptr;
 bool (*gExitDll) () = nullptr;
@@ -213,6 +217,23 @@ GetFactoryProc enterPlugin (const wchar_t* path)
     gExitDll = reinterpret_cast<bool (*) ()> (CFBundleGetFunctionPointerForName (gBundle, CFSTR ("bundleExit")));
     auto getPluginFactory = reinterpret_cast<GetFactoryProc> (CFBundleGetFunctionPointerForName (gBundle, CFSTR ("GetPluginFactory")));
     return bundleEntry && gExitDll && getPluginFactory && bundleEntry (gBundle) ? getPluginFactory : nullptr;
+#elif defined(__linux__)
+    std::string file (std::wcslen (path) * 4 + 1, '\0');
+    file.resize (std::wcstombs (file.data (), path, file.size ()));
+
+    gLibrary = dlopen (file.c_str (), RTLD_LAZY | RTLD_LOCAL);
+    if (!gLibrary)
+    {
+        // Nothing else would say which library or symbol is missing.
+        std::printf ("%s\n", dlerror ());
+        return nullptr;
+    }
+
+    // ModuleEntry keeps the handle, which VSTGUI uses to find the plug-in's bundle.
+    auto moduleEntry = reinterpret_cast<bool (*) (void*)> (dlsym (gLibrary, "ModuleEntry"));
+    gExitDll = reinterpret_cast<bool (*) ()> (dlsym (gLibrary, "ModuleExit"));
+    auto getPluginFactory = reinterpret_cast<GetFactoryProc> (dlsym (gLibrary, "GetPluginFactory"));
+    return moduleEntry && gExitDll && getPluginFactory && moduleEntry (gLibrary) ? getPluginFactory : nullptr;
 #endif
 }
 
@@ -245,6 +266,8 @@ void unloadPlugin ()
     FreeLibrary (gModule);
 #elif defined(__APPLE__)
     CFRelease (gBundle);
+#elif defined(__linux__)
+    dlclose (gLibrary);
 #endif
 }
 

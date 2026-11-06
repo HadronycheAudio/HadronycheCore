@@ -10,7 +10,7 @@ It only holds what more than one plug-in needs, and it isn't a framework. Single
 
 ## Commands
 
-Windows x64 with Visual Studio 2022 and CMake 3.25 or newer is where this is developed. macOS, on Intel and Apple Silicon with Xcode, is built and tested by CI.
+Windows x64 with Visual Studio 2022 and CMake 3.25 or newer is where this is developed. macOS, on Intel and Apple Silicon with Xcode, is built and tested by CI. Linux builds with Ninja and GCC: `tools/linux/install-build-packages.sh` installs what it needs, and each configuration needs its own folder, with `-G Ninja -DCMAKE_BUILD_TYPE=Release`, because the SDK's Linux output paths assume a single configuration.
 
 ```powershell
 # Configure. The parts using the SDK need a checkout of it, at the same version as the plug-ins.
@@ -58,7 +58,7 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 
 ### Building
 
-- **The SDK's `-ffast-math -ffp-contract=fast` stay off on macOS,** through the flags after it in `hadronyche_use_vst3_sdk`. With them, the compiler may remove every `std::isfinite`, and on Apple Silicon `2 * (1 - 100 / 100)` comes out at about -4e-17, so that fully wet effects let through a trace of their dry signal. The plug-ins' tests failed on exactly this.
+- **The SDK's `-ffast-math -ffp-contract=fast` stay off on macOS, and fused multiplies stay off on Linux,** through the flags after it in `hadronyche_use_vst3_sdk`. With them, the compiler may remove every `std::isfinite`, and on Apple Silicon `2 * (1 - 100 / 100)` comes out at about -4e-17, so that fully wet effects let through a trace of their dry signal. The plug-ins' tests failed on exactly this.
 - **Never change the Audio Unit manufacturer code `Hdrn`.** Hosts use it to find plug-ins in saved projects.
 - **Stay on AudioUnitSDK 1.1.0 unless the SDK's wrapper moves on.** It's the first with its headers where the wrapper looks for them, and later ones need newer C++.
 - **A plug-in's `CMAKE_OSX_DEPLOYMENT_TARGET` decides which Macs it runs on,** and a build defaults to the machine's own version. `tools/macos/test-installer.sh` reads it from the binaries, because nothing else would notice.
@@ -84,7 +84,7 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 | `hadronyche_gui` | SDK, VSTGUI | `PanelEditor` |
 | `hadronyche_testhost` | SDK headers | A VST3 host for test programs, with signals, measurements and a runner |
 
-`tools/macos/` builds a plug-in's `.pkg` installer and tests it on CI, and `tools/nulltest/` compares two builds, on Windows only so far.
+`tools/macos/` builds a plug-in's `.pkg` installer and tests it on CI, and `tools/nulltest/` compares two builds, on Windows and Linux.
 
 - **`PanelEditor`:** a plug-in provides `buildPanel`, and optionally `onSync` and `onClose`. A control's tag is its parameter's ID, and tags from the parameter count upwards are the plug-in's own, which only `valueChanged` handles.
 - **The test host:** a plug-in's `Plug` derives from `PlugBase`, and adds what its own features need. Measurements that differ between plug-ins stay in them, such as each `measureFrequency`.
@@ -97,7 +97,8 @@ Each plug-in pins its own version of this library, so a change only arrives when
 2. **Build the plug-in with the new version, in Debug and Release, and run its tests.** Don't weaken or skip them. Its `CompatibilityTests.cpp` guards saved projects.
 3. **Compare it with the build it replaces, using `tools/nulltest/`,** unless the change is meant to alter what a host sees, and then check that only that changed:
    - Build `tools/nulltest` once, and keep that binary for both sides of the comparison. It uses only the SDK's interfaces.
-   - `tools/nulltest/dump-plugin.sh <NullTest.exe> <tests exe> <.vst3 bundle> <NAME> <folder>` dumps a build: classes, buses, parameters and their text, saved state, how it reads old and damaged state, rendered audio and the panel. `NAME` is the start of the plug-in's `<NAME>_SCREENSHOTS` variable.
+   - `tools/nulltest/dump-plugin.sh <NullTest> <tests program> <.vst3 bundle> <NAME> <folder>` dumps a build: classes, buses, parameters and their text, saved state, how it reads old and damaged state, rendered audio and, on Windows only, the panel. `NAME` is the start of the plug-in's `<NAME>_SCREENSHOTS` variable.
+   - Output differs between platforms, so only compare builds from the same platform.
    - `tools/nulltest/compare.py <old folder> <new folder>` compares two dumps bit for bit.
    - LoopTexturer's panel test runs against the clock, so add `--panel-ignore 215,185,965,305 --panel-tolerance 700` for it, and look at its panels by eye. Run the old build twice first, to see what varies by itself.
 4. **Test it in Cubase** if you can, or say clearly that you couldn't. Nothing here measures how it sounds.

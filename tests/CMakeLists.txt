@@ -12,7 +12,7 @@ if(VST3_SDK_DIR)
     option(SMTG_CREATE_PLUGIN_LINK "Symlink the built plug-in into the VST3 folder" OFF)
     add_subdirectory("${VST3_SDK_DIR}" "${CMAKE_BINARY_DIR}/vst3sdk" EXCLUDE_FROM_ALL)
     smtg_enable_vst3_sdk()
-    if(XCODE)
+    if(XCODE OR LINUX)
         add_compile_options(-fno-fast-math -ffp-contract=off)
     endif()
 

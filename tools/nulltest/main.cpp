@@ -1,4 +1,4 @@
-// Usage: NullTest <path to a plug-in's DLL> <output folder>
+// Usage: NullTest <path to a plug-in's DLL or .so> <output folder>
 //
 // Dumps everything a host can observe about a built plug-in into a folder: its classes, buses, parameters
 // and their text, saved state, how it reads old and damaged state, and rendered audio across many settings.
@@ -19,9 +19,14 @@
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 #include "public.sdk/source/common/memorystream.h"
 
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -32,6 +37,7 @@
 #include <limits>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace Steinberg;
@@ -1082,7 +1088,7 @@ void renderLooper ()
         saveOutput ("looper-sync-1-settle", plug.render (seconds (0.3), nullptr, { 256 }));
 
         // The tape arrives when it arrives, and nothing is playing or recording until then.
-        Sleep (3000);
+        std::this_thread::sleep_for (std::chrono::seconds (3));
         plug.render (seconds (0.1), nullptr, { 256 });
 
         context.state |= Vst::ProcessContext::kPlaying;
@@ -1110,17 +1116,22 @@ void renderLooper ()
 
 } // namespace
 
+#if defined(_WIN32)
 int wmain (int argc, wchar_t** argv)
+#else
+int main (int argc, char** argv)
+#endif
 {
     if (argc != 3)
     {
-        std::printf ("Usage: NullTest <path to a plug-in's DLL> <output folder>\n");
+        std::printf ("Usage: NullTest <path to a plug-in's DLL or .so> <output folder>\n");
         return 2;
     }
 
     gOutput = argv[2];
     fs::create_directories (gOutput);
 
+#if defined(_WIN32)
     HMODULE module = LoadLibraryW (argv[1]);
     if (!module)
     {
@@ -1131,7 +1142,21 @@ int wmain (int argc, wchar_t** argv)
     auto initDll = reinterpret_cast<bool (*) ()> (GetProcAddress (module, "InitDll"));
     auto exitDll = reinterpret_cast<bool (*) ()> (GetProcAddress (module, "ExitDll"));
     auto getPluginFactory = reinterpret_cast<GetFactoryProc> (GetProcAddress (module, "GetPluginFactory"));
-    if (!initDll || !exitDll || !getPluginFactory || !initDll ())
+    const bool entered = initDll && exitDll && getPluginFactory && initDll ();
+#else
+    void* module = dlopen (argv[1], RTLD_LAZY | RTLD_LOCAL);
+    if (!module)
+    {
+        std::printf ("Could not load: %s\n", dlerror ());
+        return 2;
+    }
+
+    auto moduleEntry = reinterpret_cast<bool (*) (void*)> (dlsym (module, "ModuleEntry"));
+    auto exitDll = reinterpret_cast<bool (*) ()> (dlsym (module, "ModuleExit"));
+    auto getPluginFactory = reinterpret_cast<GetFactoryProc> (dlsym (module, "GetPluginFactory"));
+    const bool entered = moduleEntry && exitDll && getPluginFactory && moduleEntry (module);
+#endif
+    if (!entered)
     {
         std::printf ("Not a VST3 module\n");
         return 2;
@@ -1170,7 +1195,11 @@ int wmain (int argc, wchar_t** argv)
 
     gFactory->release ();
     exitDll ();
+#if defined(_WIN32)
     FreeLibrary (module);
+#else
+    dlclose (module);
+#endif
     std::printf ("done\n");
     return 0;
 }

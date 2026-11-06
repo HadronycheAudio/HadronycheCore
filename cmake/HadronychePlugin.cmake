@@ -62,7 +62,8 @@ macro(hadronyche_use_vst3_sdk)
     # - On Apple Silicon, fused multiplies keep residues that should cancel. 2 * (1 - 100 / 100) comes out at about
     #   -4e-17, so that a fully wet plug-in still lets through a trace of its dry signal. Exact gains and lossless
     #   loops depend on arithmetic like this.
-    if(XCODE)
+    # GCC also contracts multiplies by default wherever the target has fused instructions, so Linux needs this too.
+    if(XCODE OR LINUX)
         add_compile_options(-fno-fast-math -ffp-contract=off)
     endif()
 

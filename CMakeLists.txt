@@ -43,6 +43,8 @@ if(VST3_SDK_DIR)
         target_link_libraries(hadronyche_testhost INTERFACE user32 gdi32)
     elseif(APPLE)
         target_link_libraries(hadronyche_testhost INTERFACE "-framework CoreFoundation")
+    elseif(LINUX)
+        target_link_libraries(hadronyche_testhost INTERFACE ${CMAKE_DL_LIBS})
     endif()
 endif()
 

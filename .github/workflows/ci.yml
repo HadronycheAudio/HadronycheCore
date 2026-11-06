@@ -73,3 +73,39 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+  linux:
+    name: Linux ${{ matrix.config }}
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the build's packages
+        run: bash tools/linux/install-build-packages.sh
+
+      - name: Fetch the SDK
+        run: git clone --branch "$SDK_TAG" --depth 1 --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git "$RUNNER_TEMP/vst3sdk"
+
+      # One folder per configuration, because the SDK's Linux output paths assume a single-configuration build.
+      - name: Configure
+        run: cmake -S . -B build -G Ninja "-DCMAKE_BUILD_TYPE=${{ matrix.config }}" "-DVST3_SDK_DIR=$RUNNER_TEMP/vst3sdk"
+
+      - name: Build
+        run: cmake --build build --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreGuiCheck HadronycheCoreHostCheck
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      # Nothing runs it here, but a comparison between builds shouldn't be the first to find out that it's broken.
+      - name: Build the null test tool
+        run: |
+          cmake -S tools/nulltest -B build-nulltest -G Ninja "-DCMAKE_BUILD_TYPE=${{ matrix.config }}" "-DVST3_SDK_DIR=$RUNNER_TEMP/vst3sdk"
+          cmake --build build-nulltest

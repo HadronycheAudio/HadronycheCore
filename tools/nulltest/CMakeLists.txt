@@ -26,3 +26,4 @@ if(MSVC)
     # wmain, and the SDK needs its headers read as UTF-8.
     target_compile_options(NullTest PRIVATE /utf-8)
 endif()
+target_link_libraries(NullTest PRIVATE ${CMAKE_DL_LIBS})
