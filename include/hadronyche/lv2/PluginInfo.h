@@ -5,6 +5,7 @@
 #include "pluginterfaces/vst/vsttypes.h"
 
 #include <cstdint>
+#include <string>
 
 namespace Hadronyche {
 namespace Lv2 {
@@ -31,6 +32,12 @@ struct PluginInfo
 
 // Defined in the plug-in.
 const PluginInfo& getPluginInfo ();
+
+// The panel's URI, which is saved in hosts' projects like the plug-in's.
+inline std::string uiUri (const PluginInfo& info)
+{
+    return std::string (info.uri) + "#ui";
+}
 
 // Audio, then events and latency if it has them, then the controls in ParamId order, so that a new parameter only adds
 // a port at the end.

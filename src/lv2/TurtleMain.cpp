@@ -105,8 +105,10 @@ int main (int argc, char** argv)
 
     std::ofstream manifest (bundle + "/manifest.ttl");
     manifest << "@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .\n"
-             << "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\n"
-             << "<" << info.uri << ">\n    a lv2:Plugin ;\n    lv2:binary <" << argv[2] << "> ;\n    rdfs:seeAlso <" << dataFile << "> .\n";
+             << "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n"
+             << "@prefix ui:   <http://lv2plug.in/ns/extensions/ui#> .\n\n"
+             << "<" << info.uri << ">\n    a lv2:Plugin ;\n    lv2:binary <" << argv[2] << "> ;\n    rdfs:seeAlso <" << dataFile << "> .\n\n"
+             << "<" << uiUri (info) << ">\n    a ui:X11UI ;\n    ui:binary <" << argv[2] << "> ;\n    rdfs:seeAlso <" << dataFile << "> .\n";
 
     std::ofstream out (bundle + "/" + dataFile);
     out << "# Generated from the plug-in's parameter table and src/lv2/PluginInfo.cpp.\n\n"
@@ -122,6 +124,7 @@ int main (int argc, char** argv)
         << "@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .\n"
         << "@prefix state: <http://lv2plug.in/ns/ext/state#> .\n"
         << "@prefix time:  <http://lv2plug.in/ns/ext/time#> .\n"
+        << "@prefix ui:    <http://lv2plug.in/ns/extensions/ui#> .\n"
         << "@prefix units: <http://lv2plug.in/ns/extensions/units#> .\n"
         << "@prefix urid:  <http://lv2plug.in/ns/ext/urid#> .\n\n"
         << "<" << info.uri << ">\n"
@@ -134,7 +137,8 @@ int main (int argc, char** argv)
         << "    lv2:requiredFeature urid:map , opts:options , bufsz:boundedBlockLength ;\n"
         << "    lv2:optionalFeature lv2:hardRTCapable ;\n"
         << "    lv2:extensionData state:interface ;\n"
-        << "    opts:requiredOption bufsz:maxBlockLength ;\n";
+        << "    opts:requiredOption bufsz:maxBlockLength ;\n"
+        << "    ui:ui <" << uiUri (info) << "> ;\n";
 
     if (info.hasAudioInput)
     {
@@ -173,6 +177,12 @@ int main (int argc, char** argv)
     for (Steinberg::Vst::ParamID id = 0; id < info.paramCount; ++id)
         writeControl (out, info, layout, id);
 
-    out << "    .\n";
+    out << "    .\n\n"
+        << "<" << uiUri (info) << ">\n"
+        << "    a ui:X11UI ;\n"
+        << "    ui:binary <" << argv[2] << "> ;\n"
+        << "    lv2:requiredFeature ui:parent ;\n"
+        << "    lv2:optionalFeature ui:idleInterface , ui:noUserResize , ui:resize , ui:touch ;\n"
+        << "    lv2:extensionData ui:idleInterface .\n";
     return out.good () && manifest.good () ? 0 : 1;
 }

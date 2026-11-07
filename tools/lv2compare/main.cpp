@@ -1391,7 +1391,13 @@ int main (int argc, char** argv)
         return 2;
     }
     const fs::path bundle = fs::absolute (argv[2]);
-    const std::string stem = bundle.stem ().string ();
+    // Not from the bundle's name, because the shallow path test puts a copy at a temporary one.
+    std::string stem;
+    for (const auto& entry : fs::directory_iterator (bundle))
+    {
+        if (entry.path ().extension () == ".so")
+            stem = entry.path ().stem ().string ();
+    }
     const std::string filter = argc > 3 ? argv[3] : "";
 
     void* vst3Module = dlopen (argv[1], RTLD_LAZY | RTLD_LOCAL);

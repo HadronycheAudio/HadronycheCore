@@ -49,7 +49,7 @@ assert 'it carries its own C++ runtime' no_cxx_runtime
 
 # Anything else exported could clash with the host or with other plug-ins.
 exported=$(nm -D --defined-only "$binary" | awk '{ print $3 }' | sort | tr '\n' ' ')
-assert 'it only exports lv2_descriptor' test "$exported" = 'lv2_descriptor '
+assert 'it only exports the two descriptors' test "$exported" = 'lv2_descriptor lv2ui_descriptor '
 
 missing=$(ldd "$binary" | grep 'not found' || true)
 assert 'every library it needs is here' test -z "$missing"

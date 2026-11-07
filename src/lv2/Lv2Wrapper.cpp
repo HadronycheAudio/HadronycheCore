@@ -1,6 +1,8 @@
 // Runs a plug-in's own VST3 processor behind an LV2 interface, in the same process and with no changes to it, so that
 // the two can only differ if this file gets something wrong. It has audio, MIDI, control ports, saved state, latency
-// and transport, and no panel yet. tools/lv2compare compares its output with the VST3's, bit for bit.
+// and transport, and Ui.cpp has the panel. tools/lv2compare compares its output with the VST3's, bit for bit.
+
+#include "Common.h"
 
 #include "hadronyche/lv2/PluginInfo.h"
 #include "hadronyche/vst/ParamState.h"
@@ -9,7 +11,6 @@
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
 #include "pluginterfaces/vst/ivstevents.h"
-#include "pluginterfaces/vst/ivsthostapplication.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 #include "public.sdk/source/common/memorystream.h"
@@ -29,14 +30,9 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
-#include <mutex>
 #include <new>
 #include <string>
 #include <vector>
-
-// From the SDK's linuxmain.cpp.
-extern "C" bool ModuleEntry (void*);
-extern "C" bool ModuleExit ();
 
 using namespace Steinberg;
 
@@ -54,36 +50,6 @@ constexpr int kStereo = 2;
     tresult PLUGIN_API queryInterface (const TUID, void**) override { return kNoInterface; }  \
     uint32 PLUGIN_API addRef () override { return 1; }                                        \
     uint32 PLUGIN_API release () override { return 1; }
-
-class HostContext : public Vst::IHostApplication
-{
-public:
-    tresult PLUGIN_API queryInterface (const TUID iid, void** object) override
-    {
-        if (FUnknownPrivate::iidEqual (iid, Vst::IHostApplication::iid) || FUnknownPrivate::iidEqual (iid, FUnknown::iid))
-        {
-            *object = static_cast<Vst::IHostApplication*> (this);
-            return kResultOk;
-        }
-        *object = nullptr;
-        return kNoInterface;
-    }
-
-    uint32 PLUGIN_API addRef () override { return 1; }
-    uint32 PLUGIN_API release () override { return 1; }
-
-    tresult PLUGIN_API getName (Vst::String128 name) override
-    {
-        name[0] = 0;
-        return kResultOk;
-    }
-
-    tresult PLUGIN_API createInstance (TUID, TUID, void** object) override
-    {
-        *object = nullptr;
-        return kResultFalse;
-    }
-};
 
 // A control port has one value per run (), which ParamStore::readChanges treats like a point at offset 0.
 class OnePointQueue : public Vst::IParamValueQueue
@@ -168,38 +134,6 @@ private:
     std::array<Vst::Event, kMaxEvents> _events {};
     int32 _count { 0 };
 };
-
-// The handle is null on purpose. On Linux VSTGUI only uses it to find a resources folder, by removing three levels from
-// the binary's path as if it were in a .vst3 bundle, and it crashes when a shallower LV2 path runs out, such as
-// /opt/Name.lv2/Name.so. The panels load nothing from there, so without a handle it doesn't look.
-std::mutex gModuleMutex; // The SDK's count of module users isn't safe across threads.
-
-bool enterModule ()
-{
-    const std::lock_guard<std::mutex> lock (gModuleMutex);
-    if (ModuleEntry (nullptr))
-        return true;
-
-    ModuleExit ();
-    return false;
-}
-
-void exitModule ()
-{
-    const std::lock_guard<std::mutex> lock (gModuleMutex);
-    ModuleExit ();
-}
-
-// A float can't hold every bottom of range, such as 0.001, and the nearest one is a little above it. This keeps a
-// host's minimum and maximum the same as a VST3 host's 0 and 1.
-double controlToNormalized (const ParamSpec& spec, float value)
-{
-    if (value <= static_cast<float> (spec.min))
-        return 0.0;
-    if (value >= static_cast<float> (spec.max))
-        return 1.0;
-    return plainToNormalized (spec, value);
-}
 
 // Hosts give these as different types of number.
 bool readNumber (const LV2_Atom* atom, LV2_URID floatType, LV2_URID doubleType, LV2_URID intType, LV2_URID longType, double& value)

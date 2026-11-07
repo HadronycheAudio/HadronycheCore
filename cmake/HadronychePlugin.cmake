@@ -152,7 +152,9 @@ function(hadronyche_add_lv2 name)
 
     set(bundle "${CMAKE_BINARY_DIR}/LV2/${name}.lv2")
     add_library(${name}-lv2 MODULE
+        "${HADRONYCHE_CORE_DIR}/src/lv2/Common.cpp"
         "${HADRONYCHE_CORE_DIR}/src/lv2/Lv2Wrapper.cpp"
+        "${HADRONYCHE_CORE_DIR}/src/lv2/Ui.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/memorystream.cpp"
         src/lv2/PluginInfo.cpp
         ${LV2_SOURCES}
@@ -161,7 +163,7 @@ function(hadronyche_add_lv2 name)
     string(TOUPPER "${name}" upper_name)
     target_include_directories(${name}-lv2 PRIVATE src)
     target_compile_definitions(${name}-lv2 PRIVATE ${upper_name}_VERSION="${PROJECT_VERSION}")
-    target_link_libraries(${name}-lv2 PRIVATE sdk vstgui_support hadronyche_dsp hadronyche_vst hadronyche_gui ${CMAKE_DL_LIBS})
+    target_link_libraries(${name}-lv2 PRIVATE sdk vstgui_support hadronyche_dsp hadronyche_vst hadronyche_gui xcb ${CMAKE_DL_LIBS})
     # A shared library can link with symbols missing, and then only crash when a host reaches them. No host provides any.
     target_link_options(${name}-lv2 PRIVATE
         "-Wl,--version-script=${HADRONYCHE_CORE_DIR}/cmake/lv2-exports.map"
@@ -206,11 +208,27 @@ function(hadronyche_add_lv2_tests name)
     set_target_properties(${name}Lv2Compare PROPERTIES ENABLE_EXPORTS ON)
     add_dependencies(${name}Lv2Compare ${name} ${name}-lv2)
 
+    add_executable(${name}Lv2Panel
+        "${HADRONYCHE_CORE_DIR}/tools/lv2panel/main.cpp"
+        "${VST3_SDK_DIR}/pluginterfaces/base/funknown.cpp"
+    )
+    target_include_directories(${name}Lv2Panel PRIVATE "${VST3_SDK_DIR}")
+    target_link_libraries(${name}Lv2Panel PRIVATE xcb ${CMAKE_DL_LIBS})
+    # So that a build of the comparison builds everything the LV2's tests need.
+    add_dependencies(${name}Lv2Compare ${name}Lv2Panel)
+
     set(bundle "${CMAKE_BINARY_DIR}/LV2/${name}.lv2")
     add_test(NAME lv2-matches-vst3 COMMAND ${name}Lv2Compare "$<TARGET_FILE:${name}>" "${bundle}")
     set_tests_properties(lv2-matches-vst3 PROPERTIES TIMEOUT 600)
 
     add_test(NAME lv2-shallow-path COMMAND sh -c
-        "d=$(mktemp -d /tmp/lv2-XXXXXX) && cp -r \"$2\" \"$d/\" && \"$0\" \"$1\" \"$d/$(basename \"$2\")\" load-only; s=$?; rm -rf \"$d\"; exit $s"
+        "d=$(mktemp -d /tmp/${name}-XXXXXX.lv2) && cp -r \"$2\"/. \"$d/\" && \"$0\" \"$1\" \"$d\" load-only; s=$?; rm -rf \"$d\"; exit $s"
         "$<TARGET_FILE:${name}Lv2Compare>" "$<TARGET_FILE:${name}>" "${bundle}")
+
+    # With its own screen, because two panels have to fit side by side, and from a bundle at the shallowest path there is,
+    # which is the one that VSTGUI can't handle if it's given the binary's handle.
+    add_test(NAME lv2-panel COMMAND sh -c
+        "d=$(mktemp -d /tmp/${name}-XXXXXX.lv2) && cp -r \"$2\"/. \"$d/\" && xvfb-run -a -s '-screen 0 4000x1200x24' \"$0\" \"$1\" \"$d\"; s=$?; rm -rf \"$d\"; exit $s"
+        "$<TARGET_FILE:${name}Lv2Panel>" "$<TARGET_FILE:${name}>" "${bundle}")
+    set_tests_properties(lv2-panel PROPERTIES TIMEOUT 300)
 endfunction()
