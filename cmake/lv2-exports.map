@@ -1,0 +1,7 @@
+# What an LV2 binary has to export. Nothing else should be visible to a host or to other plug-ins.
+{
+    global:
+        lv2_descriptor;
+    local:
+        *;
+};

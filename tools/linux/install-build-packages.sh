@@ -2,7 +2,8 @@
 # Installs what building a plug-in needs on Debian or Ubuntu, as listed in VSTGUI's own CMakeLists.txt.
 #
 # gtkmm and SQLite are only needed to configure. The SDK always adds VSTGUI's standalone library, which looks for them,
-# but nothing here builds that library, so the plug-ins don't link them. The tests need xvfb where there's no display.
+# but nothing here builds that library, so the plug-ins don't link them. The tests need xvfb where there's no display,
+# and the LV2 versions need lv2-dev.
 set -e
 
 # A container on CI runs as root, and has no sudo.
@@ -18,4 +19,5 @@ $sudo apt-get install -y \
     libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev wayland-protocols \
     libcairo2-dev libpango1.0-dev libfreetype-dev libfontconfig1-dev libglib2.0-dev libexpat1-dev \
     libgtkmm-3.0-dev libsqlite3-dev \
+    lv2-dev \
     xvfb

@@ -140,3 +140,77 @@ function(hadronyche_add_plugin name)
         hadronyche_add_audio_unit(${name} ${PLUGIN_AU_TYPE} ${PLUGIN_AU_SUBTYPE})
     endif()
 endfunction()
+
+# An LV2 version of a plug-in on Linux, which is the target <name>-lv2, building a bundle in <build>/LV2/<name>.lv2. It
+# needs lv2-dev. SOURCES are the same ones as the VST3's, without headers, and the plug-in also has to have
+# src/lv2/PluginInfo.cpp. Elsewhere this does nothing.
+function(hadronyche_add_lv2 name)
+    if(NOT LINUX)
+        return()
+    endif()
+    cmake_parse_arguments(PARSE_ARGV 1 LV2 "" "" "SOURCES")
+
+    set(bundle "${CMAKE_BINARY_DIR}/LV2/${name}.lv2")
+    add_library(${name}-lv2 MODULE
+        "${HADRONYCHE_CORE_DIR}/src/lv2/Lv2Wrapper.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/common/memorystream.cpp"
+        src/lv2/PluginInfo.cpp
+        ${LV2_SOURCES}
+    )
+    smtg_target_add_library_main(${name}-lv2)
+    string(TOUPPER "${name}" upper_name)
+    target_include_directories(${name}-lv2 PRIVATE src)
+    target_compile_definitions(${name}-lv2 PRIVATE ${upper_name}_VERSION="${PROJECT_VERSION}")
+    target_link_libraries(${name}-lv2 PRIVATE sdk vstgui_support hadronyche_dsp hadronyche_vst hadronyche_gui ${CMAKE_DL_LIBS})
+    # A shared library can link with symbols missing, and then only crash when a host reaches them. No host provides any.
+    target_link_options(${name}-lv2 PRIVATE
+        "-Wl,--version-script=${HADRONYCHE_CORE_DIR}/cmake/lv2-exports.map"
+        -Wl,--no-undefined
+        "$<$<CONFIG:Release>:-s>"
+    )
+    set_target_properties(${name}-lv2 PROPERTIES
+        OUTPUT_NAME ${name}
+        PREFIX ""
+        LIBRARY_OUTPUT_DIRECTORY "${bundle}"
+    )
+
+    add_executable(${name}-lv2-turtle
+        "${HADRONYCHE_CORE_DIR}/src/lv2/TurtleMain.cpp"
+        src/lv2/PluginInfo.cpp
+        src/Parameters.cpp
+    )
+    target_include_directories(${name}-lv2-turtle PRIVATE src)
+    target_link_libraries(${name}-lv2-turtle PRIVATE sdk hadronyche_dsp hadronyche_vst)
+    add_custom_command(TARGET ${name}-lv2 POST_BUILD
+        COMMAND ${name}-lv2-turtle "${bundle}" "${name}.so"
+        VERBATIM
+    )
+endfunction()
+
+# Tests that the LV2 from hadronyche_add_lv2 matches the plug-in's VST3 bit for bit, from a bundle where it's built, and
+# from one as shallow as a path can get.
+function(hadronyche_add_lv2_tests name)
+    if(NOT LINUX)
+        return()
+    endif()
+
+    add_executable(${name}Lv2Compare
+        "${HADRONYCHE_CORE_DIR}/tools/lv2compare/main.cpp"
+        "${VST3_SDK_DIR}/pluginterfaces/base/funknown.cpp"
+        "${VST3_SDK_DIR}/pluginterfaces/base/coreiids.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/common/memorystream.cpp"
+    )
+    target_include_directories(${name}Lv2Compare PRIVATE "${VST3_SDK_DIR}")
+    target_link_libraries(${name}Lv2Compare PRIVATE ${CMAKE_DL_LIBS})
+    # It counts allocations inside the plug-in by exporting malloc to it.
+    set_target_properties(${name}Lv2Compare PROPERTIES ENABLE_EXPORTS ON)
+    add_dependencies(${name}Lv2Compare ${name} ${name}-lv2)
+
+    set(bundle "${CMAKE_BINARY_DIR}/LV2/${name}.lv2")
+    add_test(NAME lv2-matches-vst3 COMMAND ${name}Lv2Compare "$<TARGET_FILE:${name}>" "${bundle}")
+    set_tests_properties(lv2-matches-vst3 PROPERTIES TIMEOUT 600)
+
+    add_test(NAME lv2-shallow-path COMMAND sh -c
+        "d=$(mktemp -d /tmp/lv2-XXXXXX) && cp -r \"$2\" \"$d/\" && \"$0\" \"$1\" \"$d/$(basename \"$2\")\" load-only; s=$?; rm -rf \"$d\"; exit $s"
+        "$<TARGET_FILE:${name}Lv2Compare>" "$<TARGET_FILE:${name}>" "${bundle}")
+endfunction()
