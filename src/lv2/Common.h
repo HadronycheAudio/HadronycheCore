@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hadronyche/lv2/Message.h"
 #include "hadronyche/vst/ParamSpec.h"
 
 #include "pluginterfaces/vst/ivsthostapplication.h"
@@ -30,10 +31,14 @@ public:
         return Steinberg::kResultOk;
     }
 
-    Steinberg::tresult PLUGIN_API createInstance (Steinberg::TUID, Steinberg::TUID, void** object) override
+    // Only messages, which allocateMessage asks for, and which the message ports can carry.
+    Steinberg::tresult PLUGIN_API createInstance (Steinberg::TUID cid, Steinberg::TUID iid, void** object) override
     {
         *object = nullptr;
-        return Steinberg::kResultFalse;
+        if (!Steinberg::FUnknownPrivate::iidEqual (cid, Steinberg::Vst::IMessage::iid) || !Steinberg::FUnknownPrivate::iidEqual (iid, Steinberg::Vst::IMessage::iid))
+            return Steinberg::kResultFalse;
+        *object = static_cast<Steinberg::Vst::IMessage*> (Message::create ());
+        return Steinberg::kResultOk;
     }
 };
 

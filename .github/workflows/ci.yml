@@ -104,6 +104,13 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      # The LV2 wrapper's messages come from hosts, and a read past their end doesn't always crash, so valgrind watches
+      # the damaged ones that the tests feed it.
+      - name: Test under valgrind
+        run: |
+          sudo apt-get install -y valgrind
+          valgrind -q --error-exitcode=1 build/bin/${{ matrix.config }}/HadronycheCoreVstTests > /dev/null
+
       # Nothing runs it here, but a comparison between builds shouldn't be the first to find out that it's broken.
       - name: Build the null test tool
         run: |

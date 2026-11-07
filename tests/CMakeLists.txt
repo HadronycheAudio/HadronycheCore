@@ -16,7 +16,7 @@ if(VST3_SDK_DIR)
         add_compile_options(-fno-fast-math -ffp-contract=off)
     endif()
 
-    add_executable(HadronycheCoreVstTests VstTests.cpp Check.h "${VST3_SDK_DIR}/public.sdk/source/common/memorystream.cpp")
+    add_executable(HadronycheCoreVstTests VstTests.cpp Check.h "${VST3_SDK_DIR}/public.sdk/source/common/memorystream.cpp" ../src/lv2/Message.cpp)
     target_compile_definitions(HadronycheCoreVstTests PRIVATE UNICODE _UNICODE NOMINMAX)
     target_link_libraries(HadronycheCoreVstTests PRIVATE hadronyche_vst)
     if(APPLE)

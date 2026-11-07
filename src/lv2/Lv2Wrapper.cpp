@@ -1,9 +1,17 @@
 // Runs a plug-in's own VST3 processor behind an LV2 interface, in the same process and with no changes to it, so that
 // the two can only differ if this file gets something wrong. It has audio, MIDI, control ports, saved state, latency
 // and transport, and Ui.cpp has the panel. tools/lv2compare compares its output with the VST3's, bit for bit.
+//
+// With message ports, it also carries the VST3 messages between the processor and the panel, which may be in another
+// process. run () only copies bytes through a queue each way, and a thread of the instance's own delivers the panel's
+// messages to the processor, as a VST3 host's UI thread would.
 
+#include "ByteQueue.h"
 #include "Common.h"
+#include "MessageAtoms.h"
 
+#include "hadronyche/lv2/Message.h"
+#include "hadronyche/lv2/MessageLink.h"
 #include "hadronyche/lv2/PluginInfo.h"
 #include "hadronyche/vst/ParamState.h"
 
@@ -27,11 +35,16 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <new>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace Steinberg;
@@ -45,6 +58,14 @@ namespace {
 constexpr int kMaxEvents = 1024;
 
 constexpr int kStereo = 2;
+
+// A message larger than this is dropped. LoopTexturer's largest is about 2 kB.
+constexpr uint32_t kMaxMessage = 1 << 16;
+constexpr size_t kToProcessorBytes = 1 << 18;
+constexpr size_t kToPanelBytes = 1 << 20;
+
+constexpr auto kMessagePoll = std::chrono::milliseconds (10);
+constexpr auto kTickInterval = std::chrono::milliseconds (33);
 
 #define LV2WRAPPER_NO_REFCOUNT                                                                \
     tresult PLUGIN_API queryInterface (const TUID, void**) override { return kNoInterface; }  \
@@ -153,13 +174,14 @@ bool readNumber (const LV2_Atom* atom, LV2_URID floatType, LV2_URID doubleType, 
     return std::isfinite (value);
 }
 
-class Instance
+class Instance : private Vst::IConnectionPoint, private MessageSender
 {
 public:
     explicit Instance (const PluginInfo& info) : _info (info), _layout (getPortLayout (info)) {}
 
     ~Instance ()
     {
+        stopMessages ();
         if (_processor)
             _processor->release ();
         if (_component)
@@ -198,6 +220,8 @@ public:
             return false;
         if (_component->queryInterface (Vst::IAudioProcessor::iid, reinterpret_cast<void**> (&_processor)) != kResultOk)
             return false;
+        if (_info.hasMessagePorts && !startMessages (map))
+            return false;
 
         Vst::ProcessSetup setup { Vst::kRealtime, Vst::kSample32, maxBlock, sampleRate };
         if (_processor->setupProcessing (setup) != kResultOk)
@@ -235,6 +259,10 @@ public:
             _eventInput = static_cast<const LV2_Atom_Sequence*> (data);
         else if (port == _layout.latency)
             _latencyOutput = static_cast<float*> (data);
+        else if (port == _layout.messageInput)
+            _messageInput = static_cast<const LV2_Atom_Sequence*> (data);
+        else if (port == _layout.messageOutput)
+            _messageOutput = static_cast<LV2_Atom_Sequence*> (data);
         else if (port - _layout.firstControl < _info.paramCount)
             _controls[port - _layout.firstControl] = static_cast<const float*> (data);
     }
@@ -255,6 +283,7 @@ public:
     {
         readControls ();
         readEvents ();
+        readMessages ();
 
         Vst::AudioBusBuffers output {};
         output.numChannels = kStereo;
@@ -296,6 +325,7 @@ public:
             *_latencyOutput = static_cast<float> (_processor->getLatencySamples ());
 
         advanceTransport (sampleCount);
+        writeMessages ();
     }
 
     LV2_State_Status save (LV2_State_Store_Function store, LV2_State_Handle handle)
@@ -339,6 +369,181 @@ public:
     }
 
 private:
+    // IConnectionPoint, as the processor's peer, which gets what the processor sends its controller.
+    tresult PLUGIN_API connect (Vst::IConnectionPoint*) override { return kResultOk; }
+    tresult PLUGIN_API disconnect (Vst::IConnectionPoint*) override { return kResultOk; }
+
+    tresult PLUGIN_API notify (Vst::IMessage* message) override
+    {
+        if (!message)
+            return kInvalidArgument;
+
+        const std::lock_guard<std::recursive_mutex> lock (_linkMutex);
+        if (!_link || !_link->fromProcessor (message))
+            send (message);
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API queryInterface (const TUID iid, void** object) override
+    {
+        if (FUnknownPrivate::iidEqual (iid, Vst::IConnectionPoint::iid) || FUnknownPrivate::iidEqual (iid, FUnknown::iid))
+        {
+            *object = static_cast<Vst::IConnectionPoint*> (this);
+            return kResultOk;
+        }
+        *object = nullptr;
+        return kNoInterface;
+    }
+
+    uint32 PLUGIN_API addRef () override { return 1; }
+    uint32 PLUGIN_API release () override { return 1; }
+
+    // MessageSender, to the panel. Only messages from the wrapper's own HostContext can be read back into bytes, and a
+    // processor's allocateMessage gives those.
+    void send (Vst::IMessage* message) override
+    {
+        auto* readable = dynamic_cast<Message*> (message);
+        if (!readable)
+            return;
+
+        const auto bytes = readable->toBytes ();
+        if (bytes.size () > kMaxMessage)
+            return;
+
+        const std::lock_guard<std::mutex> lock (_toPanelMutex);
+        _toPanel->push (bytes.data (), static_cast<uint32_t> (bytes.size ()));
+    }
+
+    bool startMessages (LV2_URID_Map* map)
+    {
+        _atoms.map (map, _info);
+        _outgoing.resize (kMaxMessage);
+        _toProcessor = std::make_unique<ByteQueue> (kToProcessorBytes);
+        _toPanel = std::make_unique<ByteQueue> (kToPanelBytes);
+        _link = createDspLink ();
+
+        // The processor introduces itself to its peer as it connects, so the link has to exist by then.
+        if (_component->queryInterface (Vst::IConnectionPoint::iid, reinterpret_cast<void**> (&_processorConnection)) != kResultOk)
+            return false;
+        if (_processorConnection->connect (this) != kResultOk)
+            return false;
+
+        _messageThread = std::thread ([this] { runMessages (); });
+        return true;
+    }
+
+    void stopMessages ()
+    {
+        if (_messageThread.joinable ())
+        {
+            {
+                const std::lock_guard<std::mutex> lock (_stopMutex);
+                _isStopping = true;
+            }
+            _stopWake.notify_all ();
+            _messageThread.join ();
+        }
+        if (_processorConnection)
+        {
+            _processorConnection->disconnect (this);
+            _processorConnection->release ();
+            _processorConnection = nullptr;
+        }
+
+        const std::lock_guard<std::recursive_mutex> lock (_linkMutex);
+        _link.reset ();
+    }
+
+    void runMessages ()
+    {
+        auto nextTick = std::chrono::steady_clock::now ();
+        std::vector<uint8_t> bytes;
+        std::unique_lock<std::mutex> stopLock (_stopMutex);
+        while (!_isStopping)
+        {
+            _stopWake.wait_for (stopLock, kMessagePoll);
+            if (_isStopping)
+                break;
+            stopLock.unlock ();
+
+            uint32_t size = 0;
+            while (_toProcessor->peekSize (size))
+            {
+                bytes.resize (size);
+                _toProcessor->pop (bytes.data ());
+                if (auto* message = Message::fromBytes (bytes.data (), bytes.size ()))
+                {
+                    const std::lock_guard<std::recursive_mutex> lock (_linkMutex);
+                    if (!_link || !_link->fromPanel (message, *this))
+                        _processorConnection->notify (message);
+                    message->release ();
+                }
+            }
+
+            const auto now = std::chrono::steady_clock::now ();
+            if (now >= nextTick)
+            {
+                nextTick = now + kTickInterval;
+                const std::lock_guard<std::recursive_mutex> lock (_linkMutex);
+                if (_link)
+                    _link->tick (*this);
+            }
+            stopLock.lock ();
+        }
+    }
+
+    // Audio thread: whatever doesn't fit in the queue is dropped.
+    void readMessages ()
+    {
+        if (!_messageInput)
+            return;
+
+        LV2_ATOM_SEQUENCE_FOREACH (_messageInput, event)
+        {
+            const void* bytes = nullptr;
+            uint32_t size = 0;
+            if (_atoms.read (&event->body, static_cast<uint32_t> (sizeof (LV2_Atom)) + event->body.size, bytes, size) && size <= kMaxMessage)
+                _toProcessor->push (bytes, size);
+        }
+    }
+
+    // Audio thread. The host sets the port's size to its room before each run (). A message that doesn't fit waits for
+    // the next one, unless it never could.
+    void writeMessages ()
+    {
+        if (!_messageOutput)
+            return;
+
+        const uint32_t room = _messageOutput->atom.size;
+        if (room < sizeof (LV2_Atom_Sequence_Body))
+            return;
+
+        _messageOutput->atom.type = _atomSequence;
+        _messageOutput->atom.size = sizeof (LV2_Atom_Sequence_Body);
+        _messageOutput->body.unit = 0;
+        _messageOutput->body.pad = 0;
+
+        uint32_t size = 0;
+        while (_toPanel->peekSize (size))
+        {
+            // The event's time, then the atom with its header, which LV2_Atom_Event already counts.
+            const uint32_t eventSize = lv2_atom_pad_size (static_cast<uint32_t> (sizeof (LV2_Atom_Event) - sizeof (LV2_Atom)) + MessageAtoms::atomSize (size));
+            if (eventSize > room - sizeof (LV2_Atom_Sequence_Body) || size > kMaxMessage)
+            {
+                _toPanel->skip ();
+                continue;
+            }
+            if (eventSize > room - _messageOutput->atom.size)
+                break;
+
+            _toPanel->pop (_outgoing.data ());
+            auto* event = reinterpret_cast<LV2_Atom_Event*> (reinterpret_cast<uint8_t*> (&_messageOutput->body) + _messageOutput->atom.size);
+            event->time.frames = 0;
+            _atoms.write (&event->body, _outgoing.data (), size);
+            _messageOutput->atom.size += eventSize;
+        }
+    }
+
     void readUrids (LV2_URID_Map* map)
     {
         const auto get = [map] (const char* uri) { return map->map (map->handle, uri); };
@@ -350,6 +555,7 @@ private:
         _atomDouble = get (LV2_ATOM__Double);
         _atomInt = get (LV2_ATOM__Int);
         _atomLong = get (LV2_ATOM__Long);
+        _atomSequence = get (LV2_ATOM__Sequence);
         _timePosition = get (LV2_TIME__Position);
         _timeFrame = get (LV2_TIME__frame);
         _timeSpeed = get (LV2_TIME__speed);
@@ -514,6 +720,7 @@ private:
     LV2_URID _atomDouble { 0 };
     LV2_URID _atomInt { 0 };
     LV2_URID _atomLong { 0 };
+    LV2_URID _atomSequence { 0 };
     LV2_URID _timePosition { 0 };
     LV2_URID _timeFrame { 0 };
     LV2_URID _timeSpeed { 0 };
@@ -541,6 +748,23 @@ private:
     Vst::ProcessContext _context { };
     bool _hasContext { false };
     bool _isPlaying { false };
+
+    // Message ports. Every link call holds _linkMutex, and producers to the panel take turns with _toPanelMutex, so
+    // that each queue has one writer at a time.
+    const LV2_Atom_Sequence* _messageInput { nullptr };
+    LV2_Atom_Sequence* _messageOutput { nullptr };
+    MessageAtoms _atoms;
+    std::unique_ptr<ByteQueue> _toProcessor;
+    std::unique_ptr<ByteQueue> _toPanel;
+    std::vector<uint8_t> _outgoing;
+    std::mutex _toPanelMutex;
+    std::recursive_mutex _linkMutex; // A processor can answer a message from inside notify.
+    std::unique_ptr<DspLink> _link;
+    Vst::IConnectionPoint* _processorConnection { nullptr };
+    std::thread _messageThread;
+    std::mutex _stopMutex;
+    std::condition_variable _stopWake;
+    bool _isStopping { false };
 };
 
 LV2_Handle instantiate (const LV2_Descriptor*, double sampleRate, const char*, const LV2_Feature* const* features)

@@ -1,17 +1,23 @@
-// Shows a plug-in's own VST3 panel as an LV2 UI, through its own controller. The controller only hears about the audio
-// side through control ports, so this doesn't suit a plug-in whose panel shares memory with its processor.
-// tools/lv2panel compares what this draws and writes with the VST3's panel.
+// Shows a plug-in's own VST3 panel as an LV2 UI, through its own controller. The controller hears about the audio side
+// through control ports, and with message ports through the VST3 messages that Lv2Wrapper.cpp carries, never through
+// shared memory, since a host can run the UI in another process. tools/lv2panel compares what this draws and writes
+// with the VST3's panel.
 
 #include "Common.h"
+#include "MessageAtoms.h"
 
+#include "hadronyche/lv2/Message.h"
+#include "hadronyche/lv2/MessageLink.h"
 #include "hadronyche/lv2/PluginInfo.h"
 
 #include "pluginterfaces/base/ipluginbase.h"
 #include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 
+#include <lv2/atom/atom.h>
 #include <lv2/core/lv2.h>
 #include <lv2/ui/ui.h>
+#include <lv2/urid/urid.h>
 
 #include <xcb/xcb.h>
 
@@ -22,6 +28,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <new>
 #include <string>
 #include <utility>
@@ -152,7 +159,7 @@ public:
     tresult PLUGIN_API resizeView (IPlugView* view, ViewRect* size) override { return view->onSize (size); }
 };
 
-class Ui : public Vst::IComponentHandler
+class Ui : public Vst::IComponentHandler, public Vst::IConnectionPoint, private MessageSender
 {
 public:
     Ui (const PluginInfo& info, LV2UI_Write_Function write, LV2UI_Controller controller)
@@ -175,6 +182,12 @@ public:
                 xcb_destroy_window (_connection, _window);
             xcb_disconnect (_connection); // This flushes.
         }
+        if (_controllerConnection)
+        {
+            _controllerConnection->disconnect (this);
+            _controllerConnection->release ();
+        }
+        _link.reset ();
         if (_controller)
         {
             _controller->setComponentHandler (nullptr);
@@ -183,7 +196,8 @@ public:
         }
     }
 
-    bool create (xcb_window_t parent, const LV2UI_Resize* resize, const LV2UI_Touch* touch)
+    // Without a URID map, the panel opens without messages, like a VST3 panel whose processor never introduced itself.
+    bool create (xcb_window_t parent, const LV2UI_Resize* resize, const LV2UI_Touch* touch, LV2_URID_Map* map)
     {
         _touch = touch;
         _portValues.resize (_info.paramCount);
@@ -191,13 +205,19 @@ public:
         for (Vst::ParamID id = 0; id < _info.paramCount; ++id)
             _portValues[id] = static_cast<float> (_info.getSpec (id).defaultValue);
 
-        return createController () && createView () && openWindow (parent, resize);
+        return createController () && (!_info.hasMessagePorts || !map || connectMessages (map)) && createView () && openWindow (parent, resize);
     }
 
     uint32_t window () const { return _window; }
 
     void portEvent (uint32_t port, uint32_t size, uint32_t format, const void* buffer)
     {
+        if (port == _layout.messageOutput)
+        {
+            receive (size, format, buffer);
+            return;
+        }
+
         const uint32_t index = port - _layout.firstControl;
         if (index >= _info.paramCount || format != 0 || size != sizeof (float))
             return;
@@ -245,11 +265,28 @@ public:
 
     tresult PLUGIN_API restartComponent (int32) override { return kResultOk; }
 
+    // IConnectionPoint, as the controller's peer, which gets what the controller sends its processor.
+    tresult PLUGIN_API connect (Vst::IConnectionPoint*) override { return kResultOk; }
+    tresult PLUGIN_API disconnect (Vst::IConnectionPoint*) override { return kResultOk; }
+
+    tresult PLUGIN_API notify (Vst::IMessage* message) override
+    {
+        if (!message)
+            return kInvalidArgument;
+        send (message);
+        return kResultOk;
+    }
+
     tresult PLUGIN_API queryInterface (const TUID iid, void** object) override
     {
         if (FUnknownPrivate::iidEqual (iid, Vst::IComponentHandler::iid) || FUnknownPrivate::iidEqual (iid, FUnknown::iid))
         {
             *object = static_cast<Vst::IComponentHandler*> (this);
+            return kResultOk;
+        }
+        if (FUnknownPrivate::iidEqual (iid, Vst::IConnectionPoint::iid))
+        {
+            *object = static_cast<Vst::IConnectionPoint*> (this);
             return kResultOk;
         }
         *object = nullptr;
@@ -260,6 +297,50 @@ public:
     uint32 PLUGIN_API release () override { return 1; }
 
 private:
+    bool connectMessages (LV2_URID_Map* map)
+    {
+        _atoms.map (map, _info);
+        _eventTransfer = map->map (map->handle, LV2_ATOM__eventTransfer);
+        if (_controller->queryInterface (Vst::IConnectionPoint::iid, reinterpret_cast<void**> (&_controllerConnection)) != kResultOk)
+            return false;
+        _controllerConnection->connect (this);
+
+        _link = createUiLink ();
+        if (_link)
+            _link->start (*this);
+        return true;
+    }
+
+    // MessageSender, to the processor. Only messages from the wrapper's own HostContext can be read back into bytes, and
+    // a controller's allocateMessage gives those.
+    void send (Vst::IMessage* message) override
+    {
+        auto* readable = dynamic_cast<Message*> (message);
+        if (!readable || !_controllerConnection)
+            return;
+
+        const auto bytes = readable->toBytes ();
+        std::vector<uint8_t> atom (MessageAtoms::atomSize (static_cast<uint32_t> (bytes.size ())));
+        _atoms.write (atom.data (), bytes.data (), static_cast<uint32_t> (bytes.size ()));
+        _write (_hostController, _layout.messageInput, static_cast<uint32_t> (atom.size ()), _eventTransfer, atom.data ());
+    }
+
+    void receive (uint32_t size, uint32_t format, const void* buffer)
+    {
+        const void* bytes = nullptr;
+        uint32_t byteCount = 0;
+        if (!_controllerConnection || format != _eventTransfer || !buffer
+            || !_atoms.read (static_cast<const LV2_Atom*> (buffer), size, bytes, byteCount))
+            return;
+
+        if (auto* message = Message::fromBytes (bytes, byteCount))
+        {
+            if (!_link || !_link->fromDsp (message, *_controllerConnection))
+                _controllerConnection->notify (message);
+            message->release ();
+        }
+    }
+
     void setTouched (Vst::ParamID id, bool isGrabbed)
     {
         if (_touch)
@@ -361,6 +442,11 @@ private:
 
     std::vector<float> _portValues; // What each port last held, as this knows it.
     std::vector<bool> _isEditing;
+
+    MessageAtoms _atoms;
+    LV2_URID _eventTransfer { 0 };
+    Vst::IConnectionPoint* _controllerConnection { nullptr };
+    std::unique_ptr<UiLink> _link;
 };
 
 LV2UI_Handle instantiate (const LV2UI_Descriptor*, const char*, const char*, LV2UI_Write_Function write, LV2UI_Controller controller,
@@ -369,6 +455,7 @@ LV2UI_Handle instantiate (const LV2UI_Descriptor*, const char*, const char*, LV2
     void* parent = nullptr;
     const LV2UI_Resize* resize = nullptr;
     const LV2UI_Touch* touch = nullptr;
+    LV2_URID_Map* map = nullptr;
     for (int i = 0; features && features[i]; ++i)
     {
         if (std::strcmp (features[i]->URI, LV2_UI__parent) == 0)
@@ -377,6 +464,8 @@ LV2UI_Handle instantiate (const LV2UI_Descriptor*, const char*, const char*, LV2
             resize = static_cast<const LV2UI_Resize*> (features[i]->data);
         else if (std::strcmp (features[i]->URI, LV2_UI__touch) == 0)
             touch = static_cast<const LV2UI_Touch*> (features[i]->data);
+        else if (std::strcmp (features[i]->URI, LV2_URID__map) == 0)
+            map = static_cast<LV2_URID_Map*> (features[i]->data);
     }
 
     // Nothing draws without idle calls, but this can't insist on ui:idleInterface. REAPER calls idle without passing
@@ -385,7 +474,7 @@ LV2UI_Handle instantiate (const LV2UI_Descriptor*, const char*, const char*, LV2
         return nullptr;
 
     auto* ui = new (std::nothrow) Ui (getPluginInfo (), write, controller);
-    if (!ui || !ui->create (static_cast<xcb_window_t> (reinterpret_cast<uintptr_t> (parent)), resize, touch))
+    if (!ui || !ui->create (static_cast<xcb_window_t> (reinterpret_cast<uintptr_t> (parent)), resize, touch, map))
     {
         delete ui;
         exitModule ();

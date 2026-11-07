@@ -34,6 +34,7 @@
 #include <dlfcn.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -47,6 +48,7 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -59,13 +61,14 @@ DEF_CLASS_IID (Vst::IAudioProcessor)
 DEF_CLASS_IID (Vst::IHostApplication)
 
 // Counting allocations here catches those inside the plug-in too, because this program exports these functions and
-// the plug-in looks them up by name.
+// the plug-in looks them up by name. Each thread counts its own, because only the one calling run () has to keep from
+// allocating, and a plug-in's other threads may be allocating meanwhile.
 extern "C" void* __libc_malloc (size_t);
 extern "C" void* __libc_calloc (size_t, size_t);
 extern "C" void* __libc_realloc (void*, size_t);
 
 namespace {
-long gAllocations = 0;
+thread_local long gAllocations = 0;
 }
 
 extern "C" void* malloc (size_t size)
@@ -211,6 +214,7 @@ struct Turtle
     std::vector<Port> controls;              // Inputs only, in index order.
     bool supportsTransport { false };
     bool supportsMidi { false };
+    int controlDesignations { 0 };
 };
 
 Turtle gTurtle;
@@ -486,6 +490,20 @@ public:
         if (latency != gTurtle.special.end ())
             gDescriptor->connect_port (_instance, latency->second, &latencyPort);
 
+        // Message ports, with nothing from a panel, so that run ()'s side of them is counted for allocations too.
+        const auto messageInput = gTurtle.special.find ("ui_in");
+        const auto messageOutput = gTurtle.special.find ("ui_out");
+        if (messageInput != gTurtle.special.end () && messageOutput != gTurtle.special.end ())
+        {
+            _messageInput.resize (sizeof (LV2_Atom_Sequence));
+            _messageOutput.resize (64 * 1024);
+            auto* input = reinterpret_cast<LV2_Atom_Sequence*> (_messageInput.data ());
+            input->atom.type = gUrids.get (LV2_ATOM__Sequence);
+            input->atom.size = sizeof (LV2_Atom_Sequence_Body);
+            gDescriptor->connect_port (_instance, messageInput->second, _messageInput.data ());
+            gDescriptor->connect_port (_instance, messageOutput->second, _messageOutput.data ());
+        }
+
         lv2_atom_forge_init (&_forge, gUrids.map ());
         gDescriptor->activate (_instance);
     }
@@ -521,9 +539,41 @@ public:
 
         forgeEvents (notes);
 
+        // A host gives the output port its room, as a chunk, before each run ().
+        auto* messages = reinterpret_cast<LV2_Atom_Sequence*> (_messageOutput.data ());
+        if (messages)
+        {
+            messages->atom.type = gUrids.get (LV2_ATOM__Chunk);
+            messages->atom.size = static_cast<uint32_t> (_messageOutput.size () - sizeof (LV2_Atom));
+        }
+
         const long before = gAllocations;
         gDescriptor->run (_instance, static_cast<uint32_t> (count));
         allocationsInRun += gAllocations - before;
+
+        if (messages)
+        {
+            const bool isSequence = messages->atom.type == gUrids.get (LV2_ATOM__Sequence)
+                                    && messages->atom.size >= sizeof (LV2_Atom_Sequence_Body)
+                                    && messages->atom.size <= _messageOutput.size () - sizeof (LV2_Atom);
+            if (!isSequence)
+                ++badMessageOutputs;
+            else
+            {
+                // Each event has to be a whole message object, where the sequence's own stepping finds it.
+                const LV2_URID messageType = gUrids.get ((std::string (gDescriptor->URI) + "#message").c_str ());
+                LV2_ATOM_SEQUENCE_FOREACH (messages, event)
+                {
+                    ++messagesOut;
+                    const auto* object = reinterpret_cast<const LV2_Atom_Object*> (&event->body);
+                    const uint32_t end = static_cast<uint32_t> (reinterpret_cast<const uint8_t*> (event) - reinterpret_cast<const uint8_t*> (&messages->body))
+                                         + static_cast<uint32_t> (sizeof (LV2_Atom_Event)) + event->body.size;
+                    if (event->body.type != gUrids.get (LV2_ATOM__Object) || event->body.size < sizeof (LV2_Atom_Object_Body)
+                        || object->body.otype != messageType || end > messages->atom.size)
+                        ++badMessageOutputs;
+                }
+            }
+        }
     }
 
     void reactivate () override
@@ -562,6 +612,8 @@ public:
     }
 
     long allocationsInRun { 0 };
+    long badMessageOutputs { 0 };
+    long messagesOut { 0 };
     float latencyPort { -1.0f };
 
 private:
@@ -610,6 +662,8 @@ private:
     std::pair<std::vector<char>*, size_t> _retrieve { nullptr, 0 };
     std::vector<float> _controls;
     std::vector<uint8_t> _eventBuffer;
+    std::vector<uint8_t> _messageInput;
+    std::vector<uint8_t> _messageOutput;
     LV2_Atom_Forge _forge {};
     Transport _pendingTransport {};
     bool _hasPendingTransport { false };
@@ -1062,6 +1116,8 @@ bool readTurtle (const fs::path& file)
     const std::string text = buffer.str ();
 
     gTurtle.supportsTransport = text.find ("atom:supports time:Position") != std::string::npos;
+    for (size_t at = text.find ("lv2:designation lv2:control"); at != std::string::npos; at = text.find ("lv2:designation lv2:control", at + 1))
+        ++gTurtle.controlDesignations;
     gTurtle.supportsMidi = text.find ("atom:supports midi:MidiEvent") != std::string::npos;
 
     const auto capture = [] (const std::string& block, const char* pattern, std::string& value) {
@@ -1121,6 +1177,11 @@ void checkTurtle ()
     check (gTurtle.special.count ("out_left") == 1 && gTurtle.special.count ("out_right") == 1, "the Turtle has stereo outputs");
     check (reference.hasInput () == (gTurtle.special.count ("in_left") == 1 && gTurtle.special.count ("in_right") == 1), "the Turtle agrees about audio input");
     check (reference.hasEvents () == gTurtle.supportsMidi, "the Turtle agrees about MIDI");
+
+    // REAPER sends a UI's messages to the port marked as the control port, so with message ports, that has to be ui_in
+    // alone, and the transport still finds the events port by what it supports.
+    const bool hasEventPort = gTurtle.special.count ("events") == 1 || gTurtle.special.count ("ui_in") == 1;
+    check (gTurtle.controlDesignations == (hasEventPort ? 1 : 0), "the Turtle marks one atom input as the control port: " + std::to_string (gTurtle.controlDesignations));
     check (gTurtle.controls.size () == gControls.size (), "the Turtle has a control for each parameter: " + std::to_string (gTurtle.controls.size ()));
     if (gTurtle.controls.size () != gControls.size ())
         return;
@@ -1383,6 +1444,27 @@ void reportFloatSteps ()
 
 } // namespace
 
+// A plug-in's own messages arrive in real time, from a thread of the instance's, so the scenarios are too quick to see
+// any. This runs in real time for long enough.
+void checkMessagePorts ()
+{
+    if (gTurtle.special.find ("ui_out") == gTurtle.special.end ())
+        return;
+
+    Lv2Driver lv2 (48000.0);
+    std::vector<float> silence (256, 0.0f);
+    std::vector<float> left (256);
+    std::vector<float> right (256);
+    for (int i = 0; i < 100; ++i)
+    {
+        lv2.render (256, {}, silence.data (), silence.data (), left.data (), right.data ());
+        std::this_thread::sleep_for (std::chrono::milliseconds (5));
+    }
+    check (lv2.messagesOut > 0, "messages come out of the message port: " + std::to_string (lv2.messagesOut));
+    check (lv2.badMessageOutputs == 0, "  as a sequence of whole message objects after every run ()");
+    check (lv2.allocationsInRun == 0, "  with no allocations in run (): " + std::to_string (lv2.allocationsInRun));
+}
+
 int main (int argc, char** argv)
 {
     if (argc < 3)
@@ -1493,6 +1575,7 @@ int main (int argc, char** argv)
             check (sounded, "  has sound");
         check (std::find (actual.begin (), actual.end (), kUnwritten) == actual.end (), "  writes every sample");
         check (lv2.allocationsInRun == 0, "  no allocations in run (): " + std::to_string (lv2.allocationsInRun));
+        check (lv2.badMessageOutputs == 0, "  the message port always holds a sequence after run ()");
     }
 
     if (filter.empty ())
@@ -1501,6 +1584,7 @@ int main (int argc, char** argv)
         checkLatency ();
         checkState ();
         checkNegatives ();
+        checkMessagePorts ();
         reportFloatSteps ();
     }
 

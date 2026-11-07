@@ -1,5 +1,6 @@
 #include "Check.h"
 
+#include "hadronyche/lv2/Message.h"
 #include "hadronyche/vst/ParamSpec.h"
 #include "hadronyche/vst/ParamState.h"
 #include "hadronyche/vst/ParamStore.h"
@@ -9,6 +10,7 @@
 
 #include <cstring>
 #include <limits>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -264,6 +266,78 @@ void testStore ()
     checkNear ("and what it changed to", values[2], 1.0);
 }
 
+// The LV2 wrapper's messages: what a plug-in sets comes back from the bytes, and bytes from a host that aren't a whole
+// message give nothing, without reading past them.
+void testMessages ()
+{
+    using Hadronyche::Lv2::Message;
+
+    auto* message = Message::create ();
+    message->setMessageID ("Example");
+    message->setInt ("int", -1234567890123);
+    message->setFloat ("float", 0.1);
+    const Vst::TChar text[] = { 'H', 'i', 0 };
+    message->setString ("string", text);
+    const unsigned char binary[] = { 0, 1, 2, 255 };
+    message->setBinary ("binary", binary, sizeof (binary));
+    message->setInt ("replaced", 1);
+    message->setFloat ("replaced", 2.0);
+    const auto bytes = message->toBytes ();
+    message->release ();
+
+    auto* copy = Message::fromBytes (bytes.data (), bytes.size ());
+    check ("a message comes back from its bytes", copy != nullptr);
+    if (copy)
+    {
+        int64 integer = 0;
+        double number = 0.0;
+        Vst::TChar string[8] {};
+        const void* data = nullptr;
+        uint32 size = 0;
+        check ("  with its ID", std::strcmp (copy->getMessageID (), "Example") == 0);
+        check ("  an int", copy->getInt ("int", integer) == kResultOk && integer == -1234567890123);
+        check ("  a float", copy->getFloat ("float", number) == kResultOk && number == 0.1);
+        check ("  a string", copy->getString ("string", string, sizeof (string)) == kResultOk && string[0] == 'H' && string[1] == 'i' && string[2] == 0);
+        check ("  binary", copy->getBinary ("binary", data, size) == kResultOk && size == sizeof (binary) && std::memcmp (data, binary, size) == 0);
+        check ("  and the last of two values set under one name", copy->getFloat ("replaced", number) == kResultOk && number == 2.0);
+        check ("  but not one of another type", copy->getInt ("replaced", integer) != kResultOk && copy->getInt ("missing", integer) != kResultOk);
+        check ("  and a string cut to the room given", copy->getString ("string", string, 2 * sizeof (Vst::TChar)) == kResultOk && string[0] == 'H' && string[1] == 0);
+        copy->release ();
+    }
+
+    // Copied into buffers of exactly their size, so that a read past the end shows in valgrind.
+    bool isRefused = true;
+    for (size_t size = 0; size < bytes.size (); ++size)
+    {
+        const std::vector<uint8_t> cut (bytes.begin (), bytes.begin () + static_cast<std::ptrdiff_t> (size));
+        auto* partial = Message::fromBytes (cut.data (), cut.size ());
+        isRefused = isRefused && partial == nullptr;
+        if (partial)
+            partial->release ();
+    }
+    check ("every shortened message is refused", isRefused);
+
+    std::vector<uint8_t> longer = bytes;
+    longer.push_back (0);
+    check ("one with bytes left over is refused", Message::fromBytes (longer.data (), longer.size ()) == nullptr);
+
+    std::mt19937 random (1);
+    int parsed = 0;
+    for (int i = 0; i < 20000; ++i)
+    {
+        std::vector<uint8_t> damaged = bytes;
+        for (int j = 0; j < 1 + i % 4; ++j)
+            damaged[random () % damaged.size ()] = static_cast<uint8_t> (random ());
+        damaged.resize (random () % (damaged.size () + 1));
+        if (auto* result = Message::fromBytes (damaged.data (), damaged.size ()))
+        {
+            ++parsed;
+            result->release ();
+        }
+    }
+    std::printf ("  %d of 20000 damaged messages still read as one, and none crashed\n", parsed);
+}
+
 } // namespace
 
 int main ()
@@ -272,6 +346,7 @@ int main ()
     testReading ();
     testParameterText ();
     testStore ();
+    testMessages ();
 
     std::printf ("\n%d failure(s)\n", gFailures);
     return gFailures == 0 ? 0 : 1;

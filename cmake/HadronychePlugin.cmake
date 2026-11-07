@@ -143,21 +143,27 @@ endfunction()
 
 # An LV2 version of a plug-in on Linux, which is the target <name>-lv2, building a bundle in <build>/LV2/<name>.lv2. It
 # needs lv2-dev. SOURCES are the same ones as the VST3's, without headers, and the plug-in also has to have
-# src/lv2/PluginInfo.cpp. Elsewhere this does nothing.
+# src/lv2/PluginInfo.cpp. LINKS are a plug-in's own sources for its message ports, which define createDspLink and
+# createUiLink, as include/hadronyche/lv2/MessageLink.h describes. Elsewhere this does nothing.
 function(hadronyche_add_lv2 name)
     if(NOT LINUX)
         return()
     endif()
-    cmake_parse_arguments(PARSE_ARGV 1 LV2 "" "" "SOURCES")
+    cmake_parse_arguments(PARSE_ARGV 1 LV2 "" "" "SOURCES;LINKS")
+    if(NOT LV2_LINKS)
+        set(LV2_LINKS "${HADRONYCHE_CORE_DIR}/src/lv2/NoLinks.cpp")
+    endif()
 
     set(bundle "${CMAKE_BINARY_DIR}/LV2/${name}.lv2")
     add_library(${name}-lv2 MODULE
         "${HADRONYCHE_CORE_DIR}/src/lv2/Common.cpp"
         "${HADRONYCHE_CORE_DIR}/src/lv2/Lv2Wrapper.cpp"
+        "${HADRONYCHE_CORE_DIR}/src/lv2/Message.cpp"
         "${HADRONYCHE_CORE_DIR}/src/lv2/Ui.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/memorystream.cpp"
         src/lv2/PluginInfo.cpp
         ${LV2_SOURCES}
+        ${LV2_LINKS}
     )
     smtg_target_add_library_main(${name}-lv2)
     string(TOUPPER "${name}" upper_name)

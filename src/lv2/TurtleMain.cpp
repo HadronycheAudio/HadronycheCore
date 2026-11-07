@@ -33,7 +33,7 @@ const char* lv2Unit (const char* units)
 {
     static const std::map<std::string, const char*> known {
         { "ms", "units:ms" }, { "s", "units:s" }, { "Hz", "units:hz" }, { "%", "units:pc" }, { "dB", "units:db" },
-        { "oct", "units:oct" }, { "st", "units:semitone12TET" }, { "ct", "units:cent" },
+        { "oct", "units:oct" }, { "st", "units:semitone12TET" }, { "ct", "units:cent" }, { "bars", "units:bar" },
     };
     const auto found = known.find (units);
     if (found != known.end ())
@@ -121,8 +121,10 @@ int main (int argc, char** argv)
         << "@prefix opts:  <http://lv2plug.in/ns/ext/options#> .\n"
         << "@prefix pprop: <http://lv2plug.in/ns/ext/port-props#> .\n"
         << "@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n"
-        << "@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .\n"
-        << "@prefix state: <http://lv2plug.in/ns/ext/state#> .\n"
+        << "@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .\n";
+    if (info.hasMessagePorts)
+        out << "@prefix rsz:   <http://lv2plug.in/ns/ext/resize-port#> .\n";
+    out << "@prefix state: <http://lv2plug.in/ns/ext/state#> .\n"
         << "@prefix time:  <http://lv2plug.in/ns/ext/time#> .\n"
         << "@prefix ui:    <http://lv2plug.in/ns/extensions/ui#> .\n"
         << "@prefix units: <http://lv2plug.in/ns/extensions/units#> .\n"
@@ -155,8 +157,11 @@ int main (int argc, char** argv)
             out << "        atom:supports midi:MidiEvent ;\n";
         if (info.followsTransport)
             out << "        atom:supports time:Position ;\n";
-        out << "        lv2:designation lv2:control ;\n"
-            << "        lv2:index " << layout.events << " ;\n"
+        // REAPER sends a UI's messages to the port marked as the control port, and the transport to any port that takes
+        // it, so with message ports, the mark goes to ui_in.
+        if (!info.hasMessagePorts)
+            out << "        lv2:designation lv2:control ;\n";
+        out << "        lv2:index " << layout.events << " ;\n"
             << "        lv2:symbol \"events\" ;\n"
             << "        lv2:name \"" << (info.hasMidiInput ? "MIDI In" : "Transport") << "\" ;\n    ] ;\n";
     }
@@ -174,6 +179,22 @@ int main (int argc, char** argv)
             << "        units:unit units:frame ;\n    ] ;\n";
     }
 
+    if (info.hasMessagePorts)
+    {
+        out << "    lv2:port [\n        a lv2:InputPort , atom:AtomPort ;\n        atom:bufferType atom:Sequence ;\n"
+            << "        atom:supports atom:Object ;\n"
+            << "        lv2:designation lv2:control ;\n"
+            << "        lv2:index " << layout.messageInput << " ;\n"
+            << "        lv2:symbol \"ui_in\" ;\n"
+            << "        lv2:name \"From the panel\" ;\n    ] ;\n"
+            << "    lv2:port [\n        a lv2:OutputPort , atom:AtomPort ;\n        atom:bufferType atom:Sequence ;\n"
+            << "        atom:supports atom:Object ;\n"
+            << "        rsz:minimumSize 65536 ;\n"
+            << "        lv2:index " << layout.messageOutput << " ;\n"
+            << "        lv2:symbol \"ui_out\" ;\n"
+            << "        lv2:name \"To the panel\" ;\n    ] ;\n";
+    }
+
     for (Steinberg::Vst::ParamID id = 0; id < info.paramCount; ++id)
         writeControl (out, info, layout, id);
 
@@ -182,7 +203,10 @@ int main (int argc, char** argv)
         << "    a ui:X11UI ;\n"
         << "    ui:binary <" << argv[2] << "> ;\n"
         << "    lv2:requiredFeature ui:parent ;\n"
-        << "    lv2:optionalFeature ui:idleInterface , ui:noUserResize , ui:resize , ui:touch ;\n"
-        << "    lv2:extensionData ui:idleInterface .\n";
+        << "    lv2:optionalFeature ui:idleInterface , ui:noUserResize , ui:resize , ui:touch" << (info.hasMessagePorts ? " , urid:map" : "") << " ;\n";
+    if (info.hasMessagePorts)
+        out << "    ui:portNotification [\n        ui:plugin <" << info.uri << "> ;\n        lv2:symbol \"ui_out\" ;\n"
+            << "        ui:protocol atom:eventTransfer ;\n    ] ;\n";
+    out << "    lv2:extensionData ui:idleInterface .\n";
     return out.good () && manifest.good () ? 0 : 1;
 }

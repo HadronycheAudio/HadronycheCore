@@ -28,6 +28,9 @@ struct PluginInfo
     bool hasMidiInput;
     bool followsTransport;
     bool reportsLatency;
+
+    // The ports ui_in and ui_out, which carry VST3 messages between the processor and the panel. See MessageLink.h.
+    bool hasMessagePorts { false };
 };
 
 // Defined in the plug-in.
@@ -39,8 +42,8 @@ inline std::string uiUri (const PluginInfo& info)
     return std::string (info.uri) + "#ui";
 }
 
-// Audio, then events and latency if it has them, then the controls in ParamId order, so that a new parameter only adds
-// a port at the end.
+// Audio, then events, latency and the message ports if it has them, then the controls in ParamId order, so that a new
+// parameter only adds a port at the end.
 struct PortLayout
 {
     static constexpr uint32_t kNone = 0xFFFFFFFF;
@@ -49,6 +52,8 @@ struct PortLayout
     uint32_t audioOutput { 0 };
     uint32_t events { kNone };
     uint32_t latency { kNone };
+    uint32_t messageInput { kNone };
+    uint32_t messageOutput { kNone };
     uint32_t firstControl { 0 };
 };
 
@@ -67,6 +72,11 @@ inline PortLayout getPortLayout (const PluginInfo& info)
         layout.events = next++;
     if (info.reportsLatency)
         layout.latency = next++;
+    if (info.hasMessagePorts)
+    {
+        layout.messageInput = next++;
+        layout.messageOutput = next++;
+    }
     layout.firstControl = next;
     return layout;
 }
