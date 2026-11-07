@@ -12,9 +12,9 @@ VST is a registered trademark of Steinberg Media Technologies GmbH.
 | --- | --- | --- |
 | `hadronyche_dsp` | `hadronyche/dsp/` | `Smoother`, `FlushDenormals`, gain laws, `stepCorrection`, a state-variable filter kernel. No SDK needed |
 | `hadronyche_params` | `hadronyche/vst/ParamSpec.h` | Parameter descriptions and their curves. No SDK needed, so that a plug-in's tests can use its parameter IDs |
-| `hadronyche_vst` | `hadronyche/vst/` | `SpecParameter`, `ParamStore`, saved parameter state |
+| `hadronyche_vst` | `hadronyche/vst/` | `SpecParameter`, `ParamStore`, saved parameter state, and the `StereoProcessor` and `SpecController` base classes and `HADRONYCHE_PLUGIN_FACTORY` entry that a plug-in builds on |
 | `hadronyche_gui` | `hadronyche/gui/` | `PanelEditor`, a plug-in window built in code from sections, knobs, menus and toggles that follow their parameters |
-| `hadronyche_testhost` | `hadronyche/testhost/` | A minimal VST 3 host for test programs, which load the built plug-in and drive it the way a host does, with test signals and measurements. Needs `VST3_SDK_DIR` |
+| `hadronyche_testhost` | `hadronyche/testhost/` | A minimal VST 3 host for test programs, which load the built plug-in and drive it the way a host does, with test signals and measurements, and on Windows `PanelWindow`, which drives a plug-in's real panel off-screen. Needs `VST3_SDK_DIR` |
 
 ## Using it
 
@@ -28,12 +28,16 @@ hadronyche_use_vst3_sdk()
 hadronyche_add_plugin(MyPlugin AU_TYPE aufx AU_SUBTYPE MyPl SOURCES src/PluginEntry.cpp src/Processor.cpp)
 ```
 
+On Linux, `hadronyche_add_lv2(MyPlugin)` adds an LV2 version built from the same sources, and `hadronyche_add_lv2_tests` compares it with the VST 3.
+
 A test program links `hadronyche_testhost`, and none of the plug-in's code, so that it can only see what a host can:
 
 ```cmake
 target_link_libraries(MyPluginTests PRIVATE hadronyche_testhost)
 hadronyche_add_host_tests(MyPluginTests MyPlugin first-test second-test)
 ```
+
+A plug-in's CI is `.github/workflows/plugin-ci.yml` here, which its own workflow calls with its name and Audio Unit codes, pinned to the commit its submodule points at. It builds and tests on Windows, macOS and Linux, builds the installers and tarballs with `tools/windows/`, `tools/macos/` and `tools/linux/`, tests them, and publishes a release for a version tag.
 
 The SDK isn't a submodule here, because a plug-in would then clone it twice.
 
@@ -47,7 +51,7 @@ To test the library, which needs an SDK checkout for the parts using the SDK:
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DVST3_SDK_DIR=<path to a VST3 SDK>
-cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreGuiCheck HadronycheCoreHostCheck
+cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreVstCheck HadronycheCoreGuiCheck HadronycheCoreHostCheck
 ctest --test-dir build -C Release --output-on-failure
 ```
 

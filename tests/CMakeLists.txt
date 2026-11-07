@@ -24,7 +24,11 @@ if(VST3_SDK_DIR)
     endif()
     add_test(NAME core-vst COMMAND HadronycheCoreVstTests)
 
-    # Only built. Driving a real panel takes a real plug-in, so the plug-ins' panel tests cover what it does.
+    # Only built. Driving a real plug-in takes a real plug-in, so the plug-ins' tests cover what these do.
+    add_library(HadronycheCoreVstCheck STATIC VstCheck.cpp)
+    target_compile_definitions(HadronycheCoreVstCheck PRIVATE UNICODE _UNICODE NOMINMAX)
+    target_link_libraries(HadronycheCoreVstCheck PRIVATE hadronyche_vst)
+
     add_library(HadronycheCoreGuiCheck STATIC GuiCheck.cpp)
     target_compile_definitions(HadronycheCoreGuiCheck PRIVATE UNICODE _UNICODE NOMINMAX)
     target_link_libraries(HadronycheCoreGuiCheck PRIVATE hadronyche_gui)

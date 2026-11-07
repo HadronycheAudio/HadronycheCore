@@ -14,9 +14,13 @@
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -46,6 +50,27 @@ Steinberg::IPluginFactory* getFactory ();
 void check (const char* what, bool ok);
 int getFailureCount ();
 
+// Equal to within a millionth, for values that have been through a controller's conversions.
+inline bool nearly (double a, double b)
+{
+    return std::abs (a - b) < 1e-6 * std::max (1.0, std::abs (b));
+}
+
+// A value out of saved state bytes, for checking the format.
+template <typename T>
+T readAt (const std::vector<char>& bytes, size_t offset)
+{
+    T value {};
+    std::memcpy (&value, bytes.data () + offset, sizeof (value));
+    return value;
+}
+
+// What the controller shows for a normalized value.
+std::string paramText (Steinberg::Vst::IEditController* controller, Steinberg::Vst::ParamID id, double normalized);
+
+// Whether the controller understands text for a parameter, and the normalized value it means.
+bool paramFromText (Steinberg::Vst::IEditController* controller, Steinberg::Vst::ParamID id, const char* text, double& normalized);
+
 // One instance of the plug-in, connected and active, as a host would set it up. A plug-in's tests add to this
 // whatever its own features need.
 class PlugBase
@@ -66,8 +91,12 @@ public:
 
     std::vector<char> getStateBytes ();
 
-    // Loads a state into both sides, as a host does when it opens a project.
-    void setStateBytes (const std::vector<char>& bytes);
+    // Loads a state into both sides, as a host does when it opens a project, and says whether both took it.
+    bool setStateBytes (const std::vector<char>& bytes);
+
+    // What the host says the tempo is from now on. A plug-in starts with no tempo from the host at all, and zero
+    // goes back to that. It replaces any other context.
+    void setTempo (double bpm);
 
     Steinberg::Vst::IComponent* component { nullptr };
     Steinberg::Vst::IAudioProcessor* processor { nullptr };
@@ -88,6 +117,7 @@ private:
     class ParameterChanges;
 
     std::unique_ptr<ParameterChanges> _changes;
+    Steinberg::Vst::ProcessContext _tempoContext {};
     Steinberg::Vst::IConnectionPoint* _componentConnection { nullptr };
     Steinberg::Vst::IConnectionPoint* _controllerConnection { nullptr };
 };

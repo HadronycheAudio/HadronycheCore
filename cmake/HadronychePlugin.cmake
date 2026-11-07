@@ -147,9 +147,10 @@ function(hadronyche_add_plugin name)
 endfunction()
 
 # An LV2 version of a plug-in on Linux, which is the target <name>-lv2, building a bundle in <build>/LV2/<name>.lv2. It
-# needs lv2-dev. SOURCES are the same ones as the VST3's, without headers, and the plug-in also has to have
-# src/lv2/PluginInfo.cpp. LINKS are a plug-in's own sources for its message ports, which define createDspLink and
-# createUiLink, as include/hadronyche/lv2/MessageLink.h describes. Elsewhere this does nothing.
+# needs lv2-dev. It's built from the VST3 target's own sources under src/, so call it after hadronyche_add_plugin, and
+# the plug-in also has to have src/lv2/PluginInfo.cpp. SOURCES are any more it needs. LINKS are a plug-in's own sources
+# for its message ports, which define createDspLink and createUiLink, as include/hadronyche/lv2/MessageLink.h describes.
+# Elsewhere this does nothing.
 function(hadronyche_add_lv2 name)
     if(NOT LINUX)
         return()
@@ -158,6 +159,17 @@ function(hadronyche_add_lv2 name)
     if(NOT LV2_LINKS)
         set(LV2_LINKS "${HADRONYCHE_CORE_DIR}/src/lv2/NoLinks.cpp")
     endif()
+
+    # The SDK adds its own entry point to the VST3's sources, and the LV2 gets its own below.
+    get_target_property(vst3_sources ${name} SOURCES)
+    foreach(source ${vst3_sources})
+        cmake_path(ABSOLUTE_PATH source BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE)
+        cmake_path(IS_PREFIX CMAKE_CURRENT_SOURCE_DIR "${source}" is_own)
+        cmake_path(IS_PREFIX VST3_SDK_DIR "${source}" is_sdk)
+        if(is_own AND NOT is_sdk AND source MATCHES "\\.cpp$")
+            list(APPEND LV2_SOURCES "${source}")
+        endif()
+    endforeach()
 
     set(bundle "${CMAKE_BINARY_DIR}/LV2/${name}.lv2")
     add_library(${name}-lv2 MODULE

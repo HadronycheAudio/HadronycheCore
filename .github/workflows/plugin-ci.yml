@@ -1,0 +1,313 @@
+# What every plug-in's CI does, called from its own .github/workflows/ci.yml with its name and Audio Unit codes. The jobs
+# run in the plug-in's repository, on its checkout, and use this library's tools from its submodule. A plug-in pins the
+# commit of this file in its `uses:` line, and moves it with the submodule.
+name: Plug-in CI
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: The plug-in's name, which is also its CMake project and target
+        required: true
+        type: string
+      au_type:
+        description: The Audio Unit type, aufx for an effect and aumu for an instrument
+        required: true
+        type: string
+      au_subtype:
+        description: The Audio Unit subtype, four characters that never change
+        required: true
+        type: string
+      extra_licenses:
+        description: Licence files that the plug-in's installers add to the usual ones, separated by commas
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.config }}
+    # A pull request from this repository already ran on push, so this only adds runs for forks.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    # This image has Visual Studio 2022, which windows-2025 doesn't.
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      # This also runs the Steinberg validator, and a failure fails the build.
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }} --target ${{ inputs.name }}Tests -- -m
+
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure -j 4
+
+      - name: Read the version
+        id: version
+        if: matrix.config == 'Release'
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(${{ inputs.name }} VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          "version=$version" >> $env:GITHUB_OUTPUT
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            Write-Output "::error::The tag $env:GITHUB_REF_NAME doesn't match the version in CMakeLists.txt, which is $version"
+            exit 1
+          }
+
+      - name: Build the installer
+        if: matrix.config == 'Release'
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.version }}" installer\${{ inputs.name }}.iss'
+
+      - name: Test the installer
+        if: matrix.config == 'Release'
+        run: >
+          external\hadronychecore\tools\windows\test-installer.ps1
+          -Name ${{ inputs.name }}
+          -Installer "build\installer\${{ inputs.name }}-${{ steps.version.outputs.version }}-Setup.exe"
+          -Validator build\bin\Release\validator.exe
+          -Tests build\bin\Release\${{ inputs.name }}Tests.exe
+          -ExtraLicenses "${{ inputs.extra_licenses }}"
+
+      - name: Keep the installer
+        if: matrix.config == 'Release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer
+          path: build/installer/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    name: ${{ matrix.runner }}
+    # A pull request from this repository already ran on push, so this only adds runs for forks.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both build the same universal binaries, and each runs the half that it can.
+        runner: [macos-15, macos-15-intel]
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -S . -B build -G Xcode
+
+      # This also runs the Steinberg validator, and a failure fails the build.
+      - name: Build
+        run: cmake --build build --config Release --target ${{ inputs.name }}Tests ${{ inputs.name }} ${{ inputs.name }}-au
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Build the installer
+        run: bash external/hadronychecore/tools/macos/make-installer.sh ${{ inputs.name }} "$(sed -n 's/^project(${{ inputs.name }} VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)" build/installer
+
+      - name: Test the installer
+        run: bash external/hadronychecore/tools/macos/test-installer.sh ${{ inputs.name }} build/installer/*.pkg build/bin/Release/validator build/bin/Release/${{ inputs.name }}Tests ${{ inputs.au_type }} ${{ inputs.au_subtype }} 10.15
+
+      - name: Keep the installer
+        if: matrix.runner == 'macos-15'
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-macos
+          path: build/installer/*.pkg
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Linux ${{ matrix.config }}
+    # A pull request from this repository already ran on push, so this only adds runs for forks.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install the build's packages
+        run: bash external/hadronychecore/tools/linux/install-build-packages.sh
+
+      # One folder per configuration, because the SDK's Linux output paths assume a single-configuration build.
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+
+      # This also runs the Steinberg validator, and a failure fails the build.
+      - name: Build
+        run: cmake --build build --target ${{ inputs.name }}Tests ${{ inputs.name }} ${{ inputs.name }}Lv2Compare
+
+      # Through xvfb-run, because panel-opens needs an X server. Core dumps are on because that test has crashed twice as it
+      # finished, on CI only, and nothing else has shown where.
+      - name: Test
+        run: |
+          ulimit -c unlimited
+          sudo sysctl -w kernel.core_pattern="$PWD/core.%e.%p"
+          xvfb-run -a ctest --test-dir build --output-on-failure -j 4
+
+      - name: Show where a crash happened
+        if: failure()
+        run: |
+          sudo apt-get install -y gdb
+          for core in core.*; do
+            if [ -e "$core" ]; then
+              gdb -q -batch -ex 'thread apply all bt' build/bin/${{ matrix.config }}/${{ inputs.name }}Tests "$core"
+            fi
+          done
+
+  # The download. Built on the oldest distribution it's for, because a binary needs a glibc as new as the one it's built
+  # against. That distribution's own CMake is too old.
+  linux-package:
+    name: Linux package
+    # A pull request from this repository already ran on push, so this only adds runs for forks.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Install what fetching the code needs
+        run: apt-get update && apt-get install -y git
+
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install the build's packages
+        run: |
+          bash external/hadronychecore/tools/linux/install-build-packages.sh
+          apt-get install -y g++ python3-pip xauth
+          pip3 install "cmake==3.31.*"
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      # This also runs the Steinberg validator, and a failure fails the build.
+      - name: Build
+        run: cmake --build build --target ${{ inputs.name }}Tests ${{ inputs.name }} ${{ inputs.name }}Lv2Compare
+
+      - name: Build the tarball
+        run: bash external/hadronychecore/tools/linux/make-tarball.sh ${{ inputs.name }} "$(sed -n 's/^project(${{ inputs.name }} VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)" build/installer
+
+      - name: Test the tarball
+        run: xvfb-run -a bash external/hadronychecore/tools/linux/test-tarball.sh ${{ inputs.name }} build/installer/*-x86_64.tar.gz build/bin/Release/validator build/bin/Release/${{ inputs.name }}Tests 2.35
+
+      - name: Build the LV2 tarball
+        run: bash external/hadronychecore/tools/linux/make-lv2-tarball.sh ${{ inputs.name }} "$(sed -n 's/^project(${{ inputs.name }} VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)" build/installer
+
+      - name: Test the LV2 tarball
+        run: bash external/hadronychecore/tools/linux/test-lv2-tarball.sh ${{ inputs.name }} build/installer/*-LV2.tar.gz build/installer/*-x86_64.tar.gz build/bin/Release/${{ inputs.name }}Lv2Compare 2.35
+
+      - name: Keep the tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-linux
+          path: build/installer/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Keep what the next job tests it with
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-test-tools
+          path: |
+            build/bin/Release/validator
+            build/bin/Release/${{ inputs.name }}Tests
+            build/bin/Release/${{ inputs.name }}Lv2Compare
+            external/hadronychecore/tools/linux/test-tarball.sh
+            external/hadronychecore/tools/linux/test-lv2-tarball.sh
+          if-no-files-found: error
+          retention-days: 1
+
+  # Whether the download runs on other distributions, with only the packages that the README tells people to install.
+  linux-elsewhere:
+    name: Linux on ${{ matrix.distribution }}
+    needs: linux-package
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.distribution }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        distribution: ['debian:12', 'ubuntu:24.04', 'debian:13']
+
+    steps:
+      - name: Install what the README says, and what the test needs
+        run: |
+          apt-get update
+          apt-get install -y libxcb-cursor0 libxcb-util1 libxkbcommon-x11-0 libcairo2 libpango-1.0-0 libpangocairo-1.0-0 binutils xvfb xauth
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: installer-linux
+          path: installer
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-test-tools
+          path: tools
+
+      # Downloading an artifact loses the files' permissions.
+      - name: Test the tarball
+        run: |
+          chmod +x tools/build/bin/Release/*
+          xvfb-run -a bash tools/external/hadronychecore/tools/linux/test-tarball.sh ${{ inputs.name }} installer/*-x86_64.tar.gz tools/build/bin/Release/validator tools/build/bin/Release/${{ inputs.name }}Tests 2.35
+          bash tools/external/hadronychecore/tools/linux/test-lv2-tarball.sh ${{ inputs.name }} installer/*-LV2.tar.gz installer/*-x86_64.tar.gz tools/build/bin/Release/${{ inputs.name }}Lv2Compare 2.35
+
+  # Runs for a version tag, once every build and installer has passed.
+  release:
+    name: Release
+    needs: [build-and-test, macos, linux, linux-package, linux-elsewhere]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: installer
+          path: installer-output
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: installer-macos
+          path: installer-output
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: installer-linux
+          path: installer-output
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" installer-output/* --title "${{ inputs.name }} $TAG" --notes-file "docs/release-notes/$TAG.md" --verify-tag

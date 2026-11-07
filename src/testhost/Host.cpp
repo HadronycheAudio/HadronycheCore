@@ -1,5 +1,6 @@
 #include "hadronyche/testhost/Host.h"
 
+#include "pluginterfaces/base/ustring.h"
 #include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivstattributes.h"
 #include "pluginterfaces/vst/ivsthostapplication.h"
@@ -408,7 +409,7 @@ std::vector<char> PlugBase::getStateBytes ()
     return std::vector<char> (stream.getData (), stream.getData () + stream.getSize ());
 }
 
-void PlugBase::setStateBytes (const std::vector<char>& bytes)
+bool PlugBase::setStateBytes (const std::vector<char>& bytes)
 {
     MemoryStream forComponent;
     MemoryStream forController;
@@ -418,8 +419,33 @@ void PlugBase::setStateBytes (const std::vector<char>& bytes)
     forComponent.seek (0, IBStream::kIBSeekSet, &position);
     forController.write (const_cast<char*> (bytes.data ()), static_cast<int32> (bytes.size ()), &written);
     forController.seek (0, IBStream::kIBSeekSet, &position);
-    component->setState (&forComponent);
-    controller->setComponentState (&forController);
+    const bool componentOk = component->setState (&forComponent) == kResultOk;
+    const bool controllerOk = controller->setComponentState (&forController) == kResultOk;
+    return componentOk && controllerOk;
+}
+
+void PlugBase::setTempo (double bpm)
+{
+    _tempoContext = {};
+    _tempoContext.state = Vst::ProcessContext::kTempoValid;
+    _tempoContext.tempo = bpm;
+    context = bpm > 0.0 ? &_tempoContext : nullptr;
+}
+
+std::string paramText (Vst::IEditController* controller, Vst::ParamID id, double normalized)
+{
+    Vst::String128 string {};
+    controller->getParamStringByValue (id, normalized, string);
+    char ascii[128] {};
+    UString (string, str16BufferSize (Vst::String128)).toAscii (ascii, sizeof (ascii));
+    return ascii;
+}
+
+bool paramFromText (Vst::IEditController* controller, Vst::ParamID id, const char* text, double& normalized)
+{
+    Vst::String128 typed {};
+    UString (typed, str16BufferSize (Vst::String128)).fromAscii (text);
+    return controller->getParamValueByString (id, typed, normalized) == kResultOk;
 }
 
 void PlugBase::sendToProcessor (const char* messageId, const char* attribute, int64 value)
