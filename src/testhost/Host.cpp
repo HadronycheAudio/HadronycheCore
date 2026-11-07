@@ -164,6 +164,7 @@ HMODULE gModule = nullptr;
 CFBundleRef gBundle = nullptr;
 #elif defined(__linux__)
 void* gLibrary = nullptr;
+std::string gLibraryFile;
 #endif
 IPluginFactory* gFactory = nullptr;
 bool (*gExitDll) () = nullptr;
@@ -221,6 +222,7 @@ GetFactoryProc enterPlugin (const wchar_t* path)
     std::string file (std::wcslen (path) * 4 + 1, '\0');
     file.resize (std::wcstombs (file.data (), path, file.size ()));
 
+    gLibraryFile = file;
     gLibrary = dlopen (file.c_str (), RTLD_LAZY | RTLD_LOCAL);
     if (!gLibrary)
     {
@@ -268,6 +270,12 @@ void unloadPlugin ()
     CFRelease (gBundle);
 #elif defined(__linux__)
     dlclose (gLibrary);
+    // Pango's font thread outlives a panel, and crashed in the unloaded library when a test ended while it was busy.
+    // The plug-in links with -z nodelete to stay loaded, as a host would need it to as well.
+    void* stillLoaded = dlopen (gLibraryFile.c_str (), RTLD_LAZY | RTLD_LOCAL | RTLD_NOLOAD);
+    check ("the plug-in stays loaded after dlclose (-z nodelete)", stillLoaded != nullptr);
+    if (stillLoaded)
+        dlclose (stillLoaded);
 #endif
 }
 

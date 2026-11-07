@@ -57,6 +57,7 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 - **Don't change what `PanelLayout`'s defaults or `PanelEditor` draw.** The plug-ins' panel tests click fixed positions, and users see the result. A plug-in's own colours and sizes are passed in.
 - **On Linux, a panel's frame has to open with a run loop in an `X11::FrameConfig`.** Without one, VSTGUI never connects to the X server, and the panel crashes as it opens, in any host. Only `panel-opens` would notice, because the tests and the validator never open a panel otherwise.
 - **On Linux, `PanelEditor` has to finish Cairo's device before VSTGUI disconnects from the X server,** which VSTGUI doesn't do itself. Otherwise reopening a panel can abort the host, depending on where the next connection lands in memory.
+- **On Linux, plug-ins link with `-z nodelete`, so that closing one never unloads it.** Pango starts a font thread when a panel first draws text, and that thread never ends. A test program that unloaded the plug-in while the thread was busy crashed in the unloaded code, rarely and only on CI, and a host that unloads plug-ins can crash the same way. The test host checks that the plug-in is still loaded after `dlclose`, and `lv2compare` reads the flag from the LV2.
 
 ### LV2
 

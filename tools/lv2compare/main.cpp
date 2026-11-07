@@ -32,6 +32,8 @@
 #include <lv2/urid/urid.h>
 
 #include <dlfcn.h>
+#include <elf.h>
+#include <link.h>
 
 #include <algorithm>
 #include <chrono>
@@ -1171,6 +1173,19 @@ bool isClose (double a, double b)
 }
 
 // That the Turtle and the VST3 describe the same plug-in, which only a host would otherwise find out.
+// Pango's font thread outlives a panel, so a host that unloads the LV2 while it's busy would crash. The library has to
+// say it can't be unloaded, with -z nodelete, and this reads that from the loaded library rather than unloading it.
+bool isNoDelete (void* module)
+{
+    link_map* map = nullptr;
+    if (dlinfo (module, RTLD_DI_LINKMAP, &map) != 0 || !map)
+        return false;
+    for (const ElfW (Dyn)* entry = map->l_ld; entry->d_tag != DT_NULL; ++entry)
+        if (entry->d_tag == DT_FLAGS_1)
+            return (entry->d_un.d_val & DF_1_NODELETE) != 0;
+    return false;
+}
+
 void checkTurtle ()
 {
     Vst3Driver reference (48000.0);
@@ -1586,6 +1601,7 @@ int main (int argc, char** argv)
         checkNegatives ();
         checkMessagePorts ();
         reportFloatSteps ();
+        check (isNoDelete (lv2Module), "the LV2 can't be unloaded (-z nodelete)");
     }
 
     gFactory->release ();

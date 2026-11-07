@@ -127,8 +127,13 @@ function(hadronyche_add_plugin name)
     target_link_libraries(${name} PRIVATE sdk vstgui_support hadronyche_dsp hadronyche_vst hadronyche_gui)
 
     # Only the entry points are for a host, and anything else exported could clash with it or with other plug-ins.
+    # -z nodelete keeps the plug-in loaded after a host closes it, because Pango's font thread keeps running, and would
+    # crash in an unloaded library.
     if(LINUX)
-        target_link_options(${name} PRIVATE "-Wl,--version-script=${HADRONYCHE_CORE_DIR}/cmake/linux-exports.map")
+        target_link_options(${name} PRIVATE
+            "-Wl,--version-script=${HADRONYCHE_CORE_DIR}/cmake/linux-exports.map"
+            -Wl,-z,nodelete
+        )
     endif()
 
     if(APPLE)
@@ -171,9 +176,11 @@ function(hadronyche_add_lv2 name)
     target_compile_definitions(${name}-lv2 PRIVATE ${upper_name}_VERSION="${PROJECT_VERSION}")
     target_link_libraries(${name}-lv2 PRIVATE sdk vstgui_support hadronyche_dsp hadronyche_vst hadronyche_gui xcb ${CMAKE_DL_LIBS})
     # A shared library can link with symbols missing, and then only crash when a host reaches them. No host provides any.
+    # -z nodelete for the same reason as the VST3's.
     target_link_options(${name}-lv2 PRIVATE
         "-Wl,--version-script=${HADRONYCHE_CORE_DIR}/cmake/lv2-exports.map"
         -Wl,--no-undefined
+        -Wl,-z,nodelete
         "$<$<CONFIG:Release>:-s>"
     )
     set_target_properties(${name}-lv2 PROPERTIES
