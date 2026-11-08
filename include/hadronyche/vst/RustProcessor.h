@@ -137,9 +137,7 @@ public:
         if (!_api)
             return Steinberg::kResultOk;
 
-        std::vector<double> values (_values.size ());
-        for (size_t id = 0; id < values.size (); ++id)
-            values[id] = _values[id];
+        const std::vector<double> values = snapshot ();
         return _api->load_state (_instance, values.data (), readBytes, state) ? Steinberg::kResultOk : Steinberg::kResultFalse;
     }
 
@@ -180,13 +178,7 @@ protected:
         return RustPlugin::readState (state, [this] (Steinberg::Vst::ParamID id, double value) { _values[id] = value; });
     }
 
-    bool saveParams (Steinberg::IBStream* state)
-    {
-        std::vector<double> values (_values.size ());
-        for (size_t id = 0; id < values.size (); ++id)
-            values[id] = _values[id];
-        return RustPlugin::writeState (state, values.data ());
-    }
+    bool saveParams (Steinberg::IBStream* state) { return RustPlugin::writeState (state, snapshot ().data ()); }
 
 private:
     // More in one block than this are left out. A host sends a few at most.
@@ -209,10 +201,22 @@ private:
                && read == static_cast<Steinberg::int32> (count);
     }
 
+    // With the parameters as they stand, so that a plug-in restored before activation starts on its values.
     void prepare ()
     {
-        if (_api)
-            _api->prepare (_instance, processSetup.sampleRate, static_cast<Steinberg::uint32> (processSetup.maxSamplesPerBlock));
+        if (!_api)
+            return;
+
+        const std::vector<double> values = snapshot ();
+        _api->prepare (_instance, processSetup.sampleRate, static_cast<Steinberg::uint32> (processSetup.maxSamplesPerBlock), values.data ());
+    }
+
+    std::vector<double> snapshot () const
+    {
+        std::vector<double> values (_values.size ());
+        for (size_t id = 0; id < values.size (); ++id)
+            values[id] = _values[id];
+        return values;
     }
 
     // As ParamStore::readChanges: smoothing is the Rust side's, so only the last value in each block is needed.

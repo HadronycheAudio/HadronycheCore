@@ -14,7 +14,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use crate::{Curve, NoteEvent, Output, Params, Processor, StateReader, StateWriter, Tail, Transport};
 
 /// Goes up with any change to the structs or functions here. The C++ side refuses a plug-in with another one.
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 
 /// The C++ side's stream, for `save_state`: writes all of the bytes, or returns false.
 pub type WriteBytes = unsafe extern "C" fn(stream: *mut c_void, bytes: *const u8, count: usize) -> bool;
@@ -82,7 +82,9 @@ pub struct PluginApi {
     /// A new instance, or null if making one failed.
     pub create: unsafe extern "C" fn() -> *mut c_void,
     pub destroy: unsafe extern "C" fn(instance: *mut c_void),
-    pub prepare: unsafe extern "C" fn(instance: *mut c_void, sample_rate: f64, max_block_size: u32),
+    /// With one normalized value per parameter, as they stand.
+    pub prepare:
+        unsafe extern "C" fn(instance: *mut c_void, sample_rate: f64, max_block_size: u32, normalized: *const f64),
     pub latency: unsafe extern "C" fn(instance: *mut c_void) -> u32,
     pub tail: unsafe extern "C" fn(instance: *mut c_void) -> u32,
     /// Runs one block, and returns which output channels hold silence. Audio thread only, and never allocates.
@@ -252,7 +254,23 @@ unsafe fn with<P: Processor, R>(instance: *mut c_void, fallback: R, call: impl F
     }
 }
 
-unsafe extern "C" fn prepare<P: Processor>(instance: *mut c_void, sample_rate: f64, max_block_size: u32) {
+unsafe extern "C" fn prepare<P: Processor>(
+    instance: *mut c_void,
+    sample_rate: f64,
+    max_block_size: u32,
+    normalized: *const f64,
+) {
+    if normalized.is_null() && !P::PARAMS.is_empty() {
+        return;
+    }
+    // SAFETY: the caller gives one normalized value per parameter.
+    let normalized = unsafe {
+        if P::PARAMS.is_empty() {
+            &[][..]
+        } else {
+            slice::from_raw_parts(normalized, P::PARAMS.len())
+        }
+    };
     // SAFETY: as with says.
     unsafe {
         with::<P, ()>(instance, (), |instance| {
@@ -265,7 +283,9 @@ unsafe extern "C" fn prepare<P: Processor>(instance: *mut c_void, sample_rate: f
                 }
             }
             instance.note_copy.reserve(MAX_NOTES);
-            instance.processor.prepare(sample_rate, size);
+            instance
+                .processor
+                .prepare(sample_rate, size, &Params::new(P::PARAMS, normalized));
         });
     }
 }
@@ -478,7 +498,7 @@ mod tests {
             Self { calls: 0 }
         }
 
-        fn prepare(&mut self, _sample_rate: f64, _max_block_size: usize) {}
+        fn prepare(&mut self, _sample_rate: f64, _max_block_size: usize, _params: &Params<'_>) {}
 
         fn process(&mut self, block: Block<'_>) -> Output {
             let [input_left, _] = block.input.expect("an input");
@@ -575,7 +595,7 @@ mod tests {
     fn prepared(max_block_size: u32) -> *mut c_void {
         let instance = unsafe { (API.create)() };
         assert!(!instance.is_null());
-        unsafe { (API.prepare)(instance, 48000.0, max_block_size) };
+        unsafe { (API.prepare)(instance, 48000.0, max_block_size, [0.0f64].as_ptr()) };
         instance
     }
 
@@ -666,7 +686,7 @@ mod tests {
             assert_eq!((API.process)(ptr::null_mut(), &block), SILENT);
             assert_eq!((API.latency)(ptr::null_mut()), 0);
             assert_eq!((API.tail)(ptr::null_mut()), 0);
-            (API.prepare)(ptr::null_mut(), 48000.0, 64);
+            (API.prepare)(ptr::null_mut(), 48000.0, 64, [0.0f64].as_ptr());
             (API.destroy)(ptr::null_mut());
         }
         assert_eq!(buffers.output[0], [0.0; 3]);

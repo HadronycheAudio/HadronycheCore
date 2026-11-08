@@ -33,7 +33,7 @@ impl Processor for Example {
         }
     }
 
-    fn prepare(&mut self, sample_rate: f64, _max_block_size: usize) {
+    fn prepare(&mut self, sample_rate: f64, _max_block_size: usize, _params: &Params<'_>) {
         self.sample_rate = sample_rate;
     }
 

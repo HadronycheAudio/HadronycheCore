@@ -23,9 +23,10 @@ pub trait Processor: Send + 'static {
 
     fn new() -> Self;
 
-    /// Before the first block, and again each time the host activates the plug-in. Blocks are never longer than
-    /// `max_block_size`.
-    fn prepare(&mut self, sample_rate: f64, max_block_size: usize);
+    /// Before the first block, and again each time the host activates the plug-in, with the host's values for the
+    /// parameters as they stand, so that nothing ramps from elsewhere when sound starts. Blocks are never longer
+    /// than `max_block_size`.
+    fn prepare(&mut self, sample_rate: f64, max_block_size: usize, params: &Params<'_>);
 
     /// One block. Its output starts with whatever the host left there.
     fn process(&mut self, block: Block<'_>) -> Output;
