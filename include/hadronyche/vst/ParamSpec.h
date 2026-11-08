@@ -10,6 +10,9 @@ namespace Hadronyche {
 //
 // This header doesn't need the SDK, because a plug-in's tests include its parameters without linking it.
 
+// At or below this, a Volume control is silent, which a spec says with isSilentAtMin.
+constexpr double kVolumeSilenceDb = -60.0;
+
 enum class Curve
 {
     Linear,

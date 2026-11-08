@@ -3,7 +3,6 @@
 #include "hadronyche/lv2/Message.h"
 #include "hadronyche/vst/ParamSpec.h"
 #include "hadronyche/vst/ParamState.h"
-#include "hadronyche/vst/ParamStore.h"
 #include "hadronyche/vst/SpecParameter.h"
 
 #include "public.sdk/source/common/memorystream.h"
@@ -203,69 +202,6 @@ void testParameterText ()
     check ("the id is kept", mode.getInfo ().id == 5);
 }
 
-class TestQueue : public Vst::IParamValueQueue
-{
-public:
-    TestQueue (Vst::ParamID id, std::vector<double> values) : _id (id), _values (std::move (values)) {}
-
-    tresult PLUGIN_API queryInterface (const TUID, void**) override { return kNoInterface; }
-    uint32 PLUGIN_API addRef () override { return 1; }
-    uint32 PLUGIN_API release () override { return 1; }
-    Vst::ParamID PLUGIN_API getParameterId () override { return _id; }
-    int32 PLUGIN_API getPointCount () override { return static_cast<int32> (_values.size ()); }
-
-    tresult PLUGIN_API getPoint (int32 index, int32& offset, Vst::ParamValue& value) override
-    {
-        offset = index;
-        value = _values[static_cast<size_t> (index)];
-        return kResultTrue;
-    }
-
-    tresult PLUGIN_API addPoint (int32, Vst::ParamValue, int32&) override { return kResultFalse; }
-
-private:
-    Vst::ParamID _id;
-    std::vector<double> _values;
-};
-
-class TestChanges : public Vst::IParameterChanges
-{
-public:
-    tresult PLUGIN_API queryInterface (const TUID, void**) override { return kNoInterface; }
-    uint32 PLUGIN_API addRef () override { return 1; }
-    uint32 PLUGIN_API release () override { return 1; }
-    int32 PLUGIN_API getParameterCount () override { return static_cast<int32> (queues.size ()); }
-    Vst::IParamValueQueue* PLUGIN_API getParameterData (int32 index) override { return &queues[static_cast<size_t> (index)]; }
-    Vst::IParamValueQueue* PLUGIN_API addParameterData (const Vst::ParamID&, int32&) override { return nullptr; }
-
-    std::vector<TestQueue> queues;
-};
-
-void testStore ()
-{
-    std::printf ("[store]\n");
-    ParamStore<kSpecCount> store (getSpec);
-    checkNear ("it starts at the defaults", store.plain (1), 100.0, 1e-9);
-    checkNear ("a list's default", store.plain (2), 1.0);
-    checkNear ("as normalized values", store[2], 0.5);
-
-    store.readChanges (nullptr);
-    checkNear ("no changes change nothing", store[2], 0.5);
-
-    TestChanges changes;
-    changes.queues.emplace_back (Vst::ParamID (2), std::vector<double> { 0.1, 1.0 });
-    changes.queues.emplace_back (Vst::ParamID (99), std::vector<double> { 0.3 });
-    changes.queues.emplace_back (Vst::ParamID (3), std::vector<double> {});
-    store.readChanges (&changes);
-    checkNear ("the last point in a block is used", store[2], 1.0);
-    checkNear ("an empty queue changes nothing", store[3], 1.0);
-
-    store[0] = 0.25;
-    const auto values = store.snapshot ();
-    checkNear ("a snapshot has what was set", values[0], 0.25);
-    checkNear ("and what it changed to", values[2], 1.0);
-}
-
 // The LV2 wrapper's messages: what a plug-in sets comes back from the bytes, and bytes from a host that aren't a whole
 // message give nothing, without reading past them.
 void testMessages ()
@@ -346,7 +282,6 @@ int main ()
     testWriting ();
     testReading ();
     testParameterText ();
-    testStore ();
     testMessages ();
 
     std::printf ("\n%d failure(s)\n", gFailures);

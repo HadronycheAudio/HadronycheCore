@@ -4,7 +4,7 @@ Guidance for coding agents working in this repository. Read [Rules that protect 
 
 HadronycheCore is the code shared by the Hadronyche VST® 3 plug-ins: DiffusionDelay, LoopTexturer, PartialResynth and RabidPhatt. It uses the Steinberg VST3 SDK and VSTGUI directly. JUCE was deliberately rejected, so don't introduce it.
 
-It holds what more than one plug-in needs, and the frame that a plug-in's Rust processor fits into: `rust/hadronyche-plugin` on the Rust side, and `RustProcessor` and `RustController` on the C++ side, which carry it into the VST3, the Audio Unit and the LV2. Single-use code stays in its plug-in until a second one needs it. Anything that defines a saved project also stays in the plug-in: parameter IDs and tables, label lists, class IDs and `AppId`.
+It holds what more than one plug-in needs, and the frame that a plug-in's Rust processor fits into: `rust/hadronyche-plugin` on the Rust side, and `RustProcessor` and `RustController` on the C++ side, which carry it into the VST3, the Audio Unit and the LV2. Every plug-in's signal processing is Rust, and the C++ here is what a host sees: the VST3 classes, the panel, the LV2 wrapper, the test host and the build. Single-use code stays in its plug-in until a second one needs it. Anything that defines a saved project also stays in the plug-in: parameter IDs and tables, label lists, class IDs and `AppId`.
 
 `README.md` covers using it.
 
@@ -37,29 +37,30 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 ### Saved projects
 
 - **Don't change what `normalizedToPlain` and `plainToNormalized` calculate for an existing `Curve`.** Hosts store values normalized to 0..1, so this silently changes what saved projects sound like. Add a new curve instead, and only at the end of the enum's list if its order ever comes to matter.
-- **Don't change the saved format in `ParamState.h`.** Saved projects hold exactly these bytes. A plug-in's own additions go after the parameters, and a plug-in converts old values in the reader it passes in, because the version is per plug-in. A Rust plug-in's version is its `STATE_VERSION`, and it converts in `migrate_param`, which `RustPlugin::readState` calls for every saved value.
-- **A Rust plug-in saves more than its parameters through `save_state` and `load_state`,** which `RustProcessor` calls after ParamState.h's bytes, with the parameters already restored. A state saved before a plug-in saved anything more ends there, and `load_state` has to read that as nothing.
-- **A Rust plug-in's parameter IDs are the order of its `params!` enum,** and its generated `ParamIds.h` repeats them for the C++ side. Only ever add at the end, as with a C++ table. The Rust `Curve` has the C++ one's numbers, which `Plugin.h` fixes and `RustPlugin` checks at compile time.
-- **Only ever add to the end of `SvfMode`,** in C++ and in Rust. Plug-ins cast saved parameter values to it.
+- **Don't change the saved format in `ParamState.h`.** Saved projects hold exactly these bytes. A plug-in's own additions go after the parameters, and the version is per plug-in: its `STATE_VERSION`, with older values converted in `migrate_param`, which `RustPlugin::readState` calls for every saved value.
+- **A plug-in saves more than its parameters through `save_state` and `load_state`,** which `RustProcessor` calls after ParamState.h's bytes, with the parameters already restored. A state saved before a plug-in saved anything more ends there, and `load_state` has to read that as nothing.
+- **A plug-in's parameter IDs are the order of its `params!` enum,** and its generated `ParamIds.h` repeats them for the C++ side. Only ever add at the end. The Rust `Curve` has the C++ one's numbers, which `Plugin.h` fixes and `RustPlugin` checks at compile time, and `normalized_to_plain` in Rust has to keep giving what `normalizedToPlain` gives, which the two crates' tests hold to the same hand-written values.
+- **Only ever add to the end of `SvfMode`.** Plug-ins take saved parameter values as its index.
 - **Don't change the expected values in `tests/` to make a test pass.** They're written out by hand on purpose, and a failure means that saved projects or the sound would change.
 
 ### The audio thread
 
-`ParamStore::readChanges` and everything in `hadronyche/dsp/` run on the audio thread, in every plug-in.
+`RustProcessor::process`, `ffi.rs`'s `process`, and every `Processor::process` with everything it calls in `rust/hadronyche-dsp` run on the audio thread, in every plug-in.
 
-- **No allocation, locks, file access, system calls or anything else that can block.** The failure is audio dropouts that may not show up in testing.
-- **Nothing in `rust/hadronyche-dsp` or in a `Processor::process` allocates or reaches the operating system,** and nothing checks that but `lv2compare`'s allocation count: a plug-in sizes everything in `prepare`. `hadronyche-dsp` uses `std` only for the float functions, because those call the platform's maths library as the C++ did, which keeps a port bit for bit with what it replaces. A `no_std` crate would need `libm`, whose `exp`, `tan` and `pow` round differently.
-- **`Smoother` in Rust stays `f64`, and `step_f32` is not `step`,** for the reasons the C++ rules give for `Smoother` and `nextFloat`.
-- **A power of 2 or 10 goes through `hadronyche_dsp::pow2` and `pow10`, not `2f64.powf`.** LLVM turns `pow (2, x)` into `exp2 (x)`, which glibc rounds differently from `pow` at a few inputs in a hundred thousand, and the null test found exactly those samples. The helpers hide the base from the optimiser.
+- **No allocation, locks, file access, system calls or anything else that can block.** The failure is audio dropouts that may not show up in testing. On the Rust side that means no `Vec` growing, no `Mutex`, no `Arc` cloned or dropped, and nothing checks it but `lv2compare`'s allocation count: a plug-in sizes everything in `prepare`.
+- **`hadronyche-dsp` uses `std` only for the float functions,** because those call the platform's maths library as the C++ did, which keeps a port bit for bit with what it replaces. A `no_std` crate would need `libm`, whose `exp`, `tan` and `pow` round differently.
+- **`prepare` runs once per activation, and not before.** A plug-in may do in it what doesn't bear repeating, such as drawing a random start, and LoopTexturer's LFO does. A host may ask the latency and the tail before activation, which is why those get the sample rate as an argument.
+- **A power of 2 or 10 goes through `hadronyche_dsp::pow2`, `pow10` and `pow2_f32`, not `2f64.powf`.** LLVM turns `pow (2, x)` into `exp2 (x)`, which glibc rounds differently from `pow` at a few inputs in a hundred thousand, and the null test found exactly those samples. The helpers hide the base from the optimiser.
 - **Every entry into Rust goes through `rust/hadronyche-plugin/src/ffi.rs`, which catches panics,** because unwinding into C++ is undefined. After one, that instance gives silence for good, and the rest of the plug-in goes on, which `HadronycheCoreRustTests` checks. A panic still means a bug.
 - **`ffi.rs` copies the input before the processor sees it, and cuts a block longer than `prepare` said into pieces,** because a host may give the same memory as input and output, and Rust's two views of a block must never overlap, and a processor sizes its buffers from `prepare`. Don't hand the host's pointers to a processor directly.
 
 ### Sound
 
-- **`Smoother` must stay double precision.** In single precision it stalls about 0.01% short of its target, which leaves a held note out of tune after a glide and makes a free running loop the wrong length.
-- **`next` and `nextFloat` are not interchangeable.** A single precision signal path relies on `nextFloat` keeping its expressions in `float`. Going through double instead changes the sound, even though it compiles.
-- **`stepCorrection`'s reach only works up to a quarter of the sample rate,** which is why oscillators using it fade out by there.
-- **The SDK builds with `/fp:fast`.** Restructuring float code can change low-order bits even when the source is equivalent, so compare the output instead of assuming. That's why oscillators share only `stepCorrection`, and not the saw functions around it, which round in a different order.
+- **`Smoother` must stay `f64`.** In single precision it stalls about 0.01% short of its target, which leaves a held note out of tune after a glide and makes a free running loop the wrong length.
+- **`step` and `step_f32` are not interchangeable.** A single precision signal path relies on `step_f32` keeping its expressions in `f32`. Going through `f64` instead changes the sound, even though it compiles.
+- **`step_correction`'s reach only works up to a quarter of the sample rate,** which is why oscillators using it fade out by there.
+- **Each plug-in's Rust is bit for bit the C++ it replaced,** which `tools/nulltest/` showed, so keep the arithmetic in the order it's written and `f32` and `f64` where they are: Rust never contracts `a * b + c` into one rounding, and neither did the C++ builds, so a reordering is a change of sound, not of rounding. A `float` function in C++ is the `f32` method in Rust: `log10f` is `f32::log10`, not `f64::log10` of the same value.
+- **The SDK's C++ builds with `/fp:fast` on Windows.** A formula copied into a C++ test can round differently from the library's, so a test expects values through the library's own conversion, as `tests/RustTests.cpp` does.
 
 ### Panels
 
@@ -121,13 +122,12 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 
 | Target | Needs | Contents |
 | --- | --- | --- |
-| `hadronyche_dsp` | Nothing | `Smoother`, `FlushDenormals`, gain laws, `stepCorrection`, a state-variable filter kernel |
 | `hadronyche_params` | Nothing | `ParamSpec`, its curves and conversions |
-| `hadronyche_vst` | SDK | `SpecParameter`, `ParamStore`, saved parameter state, `StereoProcessor`, `SpecController`, `HADRONYCHE_PLUGIN_FACTORY` |
+| `hadronyche_vst` | SDK | `SpecParameter`, saved parameter state, `FlushDenormals`, `SpecController`, `RustPlugin`, `RustProcessor`, `RustController`, `HADRONYCHE_PLUGIN_FACTORY`, and the generated `ffi/Plugin.h` |
 | `hadronyche_gui` | SDK, VSTGUI | `PanelEditor` |
 | `hadronyche_testhost` | SDK headers | A VST3 host for test programs, with signals, measurements and a runner, on Windows `PanelWindow`, and on Linux `testPanelOpens` |
 | `hadronyche_add_lv2` | SDK, VSTGUI, lv2-dev | On Linux, a plug-in's LV2 version: `src/lv2/Lv2Wrapper.cpp` around its VST3 classes, `src/lv2/Ui.cpp` around its panel, VST3 messages between them through `src/lv2/Message.cpp`, with Turtle generated by `src/lv2/TurtleMain.cpp` |
-| `hadronyche-dsp` | Rust | `rust/hadronyche-dsp`: `Smoother`, the gain laws, `step_correction`, the state-variable filter kernel and `peak`, the signal processing shared in Rust, which a plug-in's own crate depends on |
+| `hadronyche-dsp` | Rust | `rust/hadronyche-dsp`: `Smoother`, the gain laws, `step_correction`, the state-variable filter kernel, `pow2` and `peak`, the signal processing shared between the plug-ins, which each one's crate depends on |
 | `hadronyche-plugin` | Rust | `rust/hadronyche-plugin`: the `Processor` trait, `params!`, `export_plugin!` and the C ABI in `ffi.rs`, which `include/hadronyche/ffi/Plugin.h` is generated from. `rust/hadronyche-example` is a gain that the tests drive through it |
 | `hadronyche_add_rust` | Rust, Cargo | `cmake/HadronycheRust.cmake` builds a plug-in's crate into its VST3, LV2 and Turtle generator, as `RustPlugin.h`, `RustProcessor.h` and `RustController.h` in `hadronyche_vst` expect |
 
@@ -135,9 +135,9 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 
 - **The LV2 wrapper:** a plug-in provides `src/lv2/PluginInfo.cpp`, and calls `hadronyche_add_lv2` and `hadronyche_add_lv2_tests`. It has audio, MIDI, control ports, state, latency, transport and the plug-in's own panel. With `hasMessagePorts`, it also carries the VST3 messages between the processor and the panel, through the ports `ui_in` and `ui_out`, and the plug-in can give `hadronyche_add_lv2` `LINKS` sources that change what passes, as LoopTexturer's `src/lv2/LooperLink.cpp` does.
 
-- **`RustProcessor`, `RustController` and `RustPlugin`:** a plug-in with its processing in Rust derives its processor and controller from the first two, adding only its class IDs and its editor, and whatever VST3 messages it exchanges with its controller, for which `RustProcessor::shared ()` gives it the Rust side's `Processor::shared`, something of the plug-in's own that its C++ side reaches through the plug-in's own C functions. `RustPlugin` reaches the Rust side through `hadronyche_plugin ()`, the one symbol that `export_plugin!` exports, and gives its parameter table as `ParamSpec`s, so `RustPlugin::getSpec` goes wherever a C++ plug-in's `getParamSpec` went: the panel and `PluginInfo`. The processor keeps the parameters' normalized values, as `ParamStore` does, and hands each block a snapshot of them, the audio, the transport and the notes. Everything a host sees, from buses to state bytes, is decided on the C++ side, the same way as in `StereoProcessor`.
+- **`RustProcessor`, `RustController` and `RustPlugin`:** a plug-in derives its processor and controller from the first two, adding only its class IDs and its editor, and whatever VST3 messages it exchanges with its controller, for which `RustProcessor::shared ()` gives it the Rust side's `Processor::shared`, something of the plug-in's own that its C++ side reaches through the plug-in's own C functions, as LoopTexturer's `src/LooperApi.h` does. `RustPlugin` reaches the Rust side through `hadronyche_plugin ()`, the one symbol that `export_plugin!` exports, and gives its parameter table as `ParamSpec`s, so `RustPlugin::getSpec` is what the panel, `SpecController` and `PluginInfo` read. The processor keeps the parameters' normalized values as atomics, takes the last point of each change, and hands each block a snapshot of them, the audio, the transport and the notes. Everything a host sees, from buses to state bytes, is decided on the C++ side. `PluginEntry.cpp` is one `HADRONYCHE_PLUGIN_FACTORY` line.
 
-- **`StereoProcessor` and `SpecController`:** a plug-in with its processing in C++ derives its processor and controller from these, with their class IDs and `Parameters.h`. The processor provides `prepareDsp` and `renderBlock`, which gets each stereo block after the parameter changes are taken and denormals are flushed, and overrides `initialize`, `setState` or `getState` for an event input or more state, calling `restoreParams` and `saveParams`. `PluginEntry.cpp` is one `HADRONYCHE_PLUGIN_FACTORY` line.
+- **The Rust side of a plug-in:** `rust/src/lib.rs` describes its parameters with `params!`, implements `Processor` for its signal processing, and ends with `export_plugin!`. Its `cargo test` keeps the generated headers current. A `Processor` gets `prepare` once per activation with the host's parameter values, `process` for each block, and `save_state` and `load_state` for anything beyond its parameters.
 
 - **`PanelEditor`:** a plug-in provides `buildPanel`, and optionally `onSync` and `onClose`. A control's tag is its parameter's ID, and tags from the parameter count upwards are the plug-in's own, which only `valueChanged` handles.
 - **The test host:** a plug-in's `Plug` derives from `PlugBase`, and adds what its own features need. `paramText`, `paramFromText`, `readAt`, `nearly` and `setStateBytes` are what every plug-in's compatibility and state tests use. Measurements that differ between plug-ins stay in them, such as each `measureFrequency`.

@@ -1,10 +1,6 @@
 #include "Check.h"
 
-#include "hadronyche/dsp/BandLimitedStep.h"
-#include "hadronyche/dsp/Denormals.h"
-#include "hadronyche/dsp/Gain.h"
-#include "hadronyche/dsp/Smoother.h"
-#include "hadronyche/dsp/Svf.h"
+#include "hadronyche/vst/Denormals.h"
 #include "hadronyche/gui/PanelLayout.h"
 #include "hadronyche/testhost/Signals.h"
 #include "hadronyche/vst/ParamSpec.h"
@@ -12,105 +8,6 @@
 using namespace Hadronyche;
 
 namespace {
-
-void testSmoother ()
-{
-    std::printf ("[smoother]\n");
-    Smoother smoother;
-    smoother.prepare (1000.0, 1.0); // One time constant per step.
-    smoother.setTarget (1.0);
-    checkNear ("one step covers 1 - 1/e", smoother.next (), 0.632120558828558);
-    checkNear ("and the next that of what's left", smoother.next (), 0.864664716763387);
-
-    smoother.snapToTarget ();
-    checkNear ("snapToTarget lands on it", smoother.next (), 1.0);
-
-    smoother.snapTo (0.25);
-    checkNear ("snapTo moves both", smoother.next (), 0.25);
-
-    // In single precision, this would stall short of the target.
-    Smoother slow;
-    slow.prepare (48000.0, 100.0);
-    slow.setTarget (1.0);
-    double value = 0.0;
-    for (int i = 0; i < 480000; ++i)
-        value = slow.next ();
-    checkNear ("it gets all the way to its target", value, 1.0, 1e-12);
-
-    Smoother single;
-    single.prepare (1000.0, 1.0);
-    single.setTarget (1.0);
-    check ("nextFloat is a float", static_cast<double> (single.nextFloat ()) == static_cast<double> (0.632120558828558f));
-}
-
-void testGain ()
-{
-    std::printf ("[gain]\n");
-    checkNear ("0 dB", dbToGain (0.0), 1.0);
-    checkNear ("-20 dB", dbToGain (-20.0), 0.1);
-    checkNear ("6 dB", dbToGain (6.0), 1.99526231496888);
-    checkNear ("the silence floor is -60 dB", kVolumeSilenceDb, -60.0);
-    checkNear ("Volume at the floor is silent", volumeToGain (-60.0), 0.0);
-    checkNear ("Volume below the floor is silent", volumeToGain (-90.0), 0.0);
-    checkNear ("Volume just above it isn't", volumeToGain (-59.0), 0.00112201845430196);
-    checkNear ("all dry", dryGain (0.0), 1.0);
-    checkNear ("dry stays full up to the middle", dryGain (50.0), 1.0);
-    checkNear ("and falls after it", dryGain (75.0), 0.5);
-    checkNear ("all wet has no dry", dryGain (100.0), 0.0);
-    checkNear ("no wet at 0", wetGain (0.0), 0.0);
-    checkNear ("wet rises to the middle", wetGain (25.0), 0.5);
-    checkNear ("and stays full", wetGain (100.0), 1.0);
-}
-
-void testStepCorrection ()
-{
-    std::printf ("[step-correction]\n");
-    checkNear ("nothing 2 samples before", stepCorrection (-2.0), 0.0);
-    checkNear ("1 sample before", stepCorrection (-1.0), 1.0 / 24.0);
-    checkNear ("half the step just before it", stepCorrection (-1e-15), 0.5, 1e-12);
-    checkNear ("and the other half just after", stepCorrection (0.0), -0.5);
-    checkNear ("1 sample after", stepCorrection (1.0), -1.0 / 24.0);
-    checkNear ("nothing 2 samples after", stepCorrection (2.0), 0.0);
-    checkNear ("half a sample before", stepCorrection (-0.5), 0.5 - 0.5 * (2.0 / 3.0 - 0.25 * (1.0 / 3.0 - 0.0625)));
-}
-
-void testSvf ()
-{
-    std::printf ("[svf]\n");
-    checkNear ("a frequency is held down to 10 Hz", svfWarp (1.0, 48000.0), std::tan (3.141592653589793 * 10.0 / 48000.0));
-    checkNear ("and up to 49% of the sample rate", svfWarp (96000.0, 48000.0), std::tan (3.141592653589793 * 0.49));
-
-    const auto c = svfCoefficients (1.0, 0.5);
-    checkNear ("k is 1/Q", c.k, 2.0, 1e-6);
-    checkNear ("a1", c.a1, 0.25, 1e-6);
-    checkNear ("a2", c.a2, 0.25, 1e-6);
-    checkNear ("a3", c.a3, 0.25, 1e-6);
-
-    // One step by hand, from silence, with an input of 1.
-    SvfState state;
-    const auto taps = svfTick (1.0f, c, state);
-    checkNear ("v1", taps.v1, 0.25, 1e-6);
-    checkNear ("v2", taps.v2, 0.25, 1e-6);
-    checkNear ("ic1", state.ic1, 0.5, 1e-6);
-    checkNear ("ic2", state.ic2, 0.5, 1e-6);
-
-    checkNear ("low-pass output", svfOutput (SvfMode::LowPass, 1.0f, 2.0f, { 0.25f, 0.5f }), 0.5, 1e-6);
-    checkNear ("high-pass output", svfOutput (SvfMode::HighPass, 1.0f, 2.0f, { 0.25f, 0.25f }), 0.25, 1e-6);
-    checkNear ("band-pass output", svfOutput (SvfMode::BandPass, 1.0f, 2.0f, { 0.25f, 0.5f }), 0.5, 1e-6);
-    checkNear ("notch output", svfOutput (SvfMode::Notch, 1.0f, 2.0f, { 0.25f, 0.5f }), 0.5, 1e-6);
-
-    // Plug-ins cast saved values to these.
-    check ("the modes' values are frozen", static_cast<int> (SvfMode::LowPass) == 0 && static_cast<int> (SvfMode::HighPass) == 1
-                                               && static_cast<int> (SvfMode::BandPass) == 2 && static_cast<int> (SvfMode::Notch) == 3);
-
-    SvfState settled;
-    const auto lowPass = svfCoefficients (svfWarp (1000.0, 48000.0), 0.707);
-    SvfTaps last { 0.0f, 0.0f };
-    for (int i = 0; i < 48000; ++i)
-        last = svfTick (1.0f, lowPass, settled);
-    checkNear ("DC comes through the low-pass", svfOutput (SvfMode::LowPass, 1.0f, lowPass.k, last), 1.0, 1e-3);
-    checkNear ("and not the high-pass", svfOutput (SvfMode::HighPass, 1.0f, lowPass.k, last), 0.0, 1e-3);
-}
 
 void testDenormals ()
 {
@@ -223,10 +120,6 @@ void testSignals ()
 int main ()
 {
     failLoudly ();
-    testSmoother ();
-    testGain ();
-    testStepCorrection ();
-    testSvf ();
     testDenormals ();
     testCurves ();
     testPanelLayout ();

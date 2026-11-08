@@ -1,5 +1,4 @@
 #include "hadronyche/vst/SpecController.h"
-#include "hadronyche/vst/StereoProcessor.h"
 
 // That the headers stand by themselves, and that a plug-in only has to provide what the comments say.
 namespace {
@@ -17,21 +16,6 @@ bool readState (Steinberg::IBStream*, const Hadronyche::ParamValueSink&)
     return true;
 }
 
-bool writeState (Steinberg::IBStream*, const std::array<double, kParamCount>&)
-{
-    return true;
-}
-
-class MinimalProcessor : public Hadronyche::StereoProcessor<kParamCount>
-{
-public:
-    MinimalProcessor () : StereoProcessor (Steinberg::FUID (), true, getSpec, readState, writeState) {}
-
-private:
-    void prepareDsp () override {}
-    void renderBlock (Steinberg::Vst::ProcessData&, Steinberg::Vst::AudioBusBuffers& output) override { output.silenceFlags = 0; }
-};
-
 class MinimalController : public Hadronyche::SpecController
 {
 public:
@@ -42,11 +26,6 @@ private:
 };
 
 } // namespace
-
-Steinberg::FUnknown* createMinimalProcessor ()
-{
-    return static_cast<Steinberg::Vst::IAudioProcessor*> (new MinimalProcessor);
-}
 
 Steinberg::FUnknown* createMinimalController ()
 {

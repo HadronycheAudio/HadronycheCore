@@ -10,12 +10,11 @@ VST is a registered trademark of Steinberg Media Technologies GmbH.
 
 | Target | Headers | Contents |
 | --- | --- | --- |
-| `hadronyche_dsp` | `hadronyche/dsp/` | `Smoother`, `FlushDenormals`, gain laws, `stepCorrection`, a state-variable filter kernel. No SDK needed |
 | `hadronyche_params` | `hadronyche/vst/ParamSpec.h` | Parameter descriptions and their curves. No SDK needed, so that a plug-in's tests can use its parameter IDs |
-| `hadronyche_vst` | `hadronyche/vst/` | `SpecParameter`, `ParamStore`, saved parameter state, and the `StereoProcessor` and `SpecController` base classes and `HADRONYCHE_PLUGIN_FACTORY` entry that a plug-in builds on |
+| `hadronyche_vst` | `hadronyche/vst/` | `SpecParameter`, saved parameter state, `FlushDenormals`, the `SpecController` base class, and `RustPlugin`, `RustProcessor` and `RustController`, which carry a plug-in's Rust processor into the VST 3, with the `HADRONYCHE_PLUGIN_FACTORY` entry |
 | `hadronyche_gui` | `hadronyche/gui/` | `PanelEditor`, a plug-in window built in code from sections, knobs, menus and toggles that follow their parameters |
 | `hadronyche_testhost` | `hadronyche/testhost/` | A minimal VST 3 host for test programs, which load the built plug-in and drive it the way a host does, with test signals and measurements, and on Windows `PanelWindow`, which drives a plug-in's real panel off-screen. Needs `VST3_SDK_DIR` |
-| `hadronyche-dsp` | `rust/hadronyche-dsp/` | The signal processing shared in Rust: `Smoother`, the gain laws, `step_correction`, the state-variable filter kernel and `peak`, which a plug-in's own crate depends on |
+| `hadronyche-dsp` | `rust/hadronyche-dsp/` | The signal processing shared between the plug-ins: `Smoother`, the gain laws, `step_correction`, the state-variable filter kernel, `pow2` and `peak`, which each plug-in's crate depends on |
 | `hadronyche-plugin` | `rust/hadronyche-plugin/` | The `Processor` trait that a plug-in's Rust side implements, `params!` for its parameter table, and `export_plugin!`, which exports it over a C ABI. `hadronyche/ffi/Plugin.h` is generated from it, and `hadronyche/vst/RustProcessor.h` and `RustController.h` are the VST 3 classes on top |
 
 ## Using it
@@ -32,7 +31,7 @@ hadronyche_add_plugin(MyPlugin AU_TYPE aufx AU_SUBTYPE MyPl SOURCES src/PluginEn
 
 On Linux, `hadronyche_add_lv2(MyPlugin)` adds an LV2 version built from the same sources, and `hadronyche_add_lv2_tests` compares it with the VST 3.
 
-A plug-in with its processing in Rust has a crate in `rust/`, built as a static library, which depends on `hadronyche-plugin` and `hadronyche-dsp` by their paths in the submodule. It describes its parameters with `params!`, implements `Processor`, and ends with `export_plugin!`. On the C++ side, its processor and controller derive from `RustProcessor` and `RustController`, adding their class IDs and the editor, and `RustPlugin::getSpec` is its parameter table. `hadronyche_add_rust(MyPlugin)`, before `hadronyche_add_plugin`, has Cargo build the crate for each configuration and links it into the VST 3, the LV2 and its Turtle generator, as a universal binary on macOS and with the plug-in's static C runtime on Windows. It needs Rust from [rustup](https://rustup.rs), with both Mac targets on macOS: `rustup target add aarch64-apple-darwin x86_64-apple-darwin`. The plug-in's `ParamIds.h`, for its tests and panel, is generated from its `params!` by its own `cargo test`, which `HADRONYCHE_UPDATE_HEADERS=1` makes write it.
+Every plug-in's processing is Rust. A plug-in has a crate in `rust/`, built as a static library, which depends on `hadronyche-plugin` and `hadronyche-dsp` by their paths in the submodule. It describes its parameters with `params!`, implements `Processor`, and ends with `export_plugin!`. On the C++ side, its processor and controller derive from `RustProcessor` and `RustController`, adding their class IDs and the editor, and `RustPlugin::getSpec` is its parameter table. `hadronyche_add_rust(MyPlugin)`, before `hadronyche_add_plugin`, has Cargo build the crate for each configuration and links it into the VST 3, the LV2 and its Turtle generator, as a universal binary on macOS and with the plug-in's static C runtime on Windows. It needs Rust from [rustup](https://rustup.rs), with both Mac targets on macOS: `rustup target add aarch64-apple-darwin x86_64-apple-darwin`. The plug-in's `ParamIds.h`, for its tests and panel, is generated from its `params!` by its own `cargo test`, which `HADRONYCHE_UPDATE_HEADERS=1` makes write it.
 
 A test program links `hadronyche_testhost`, and none of the plug-in's code, so that it can only see what a host can:
 

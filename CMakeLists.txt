@@ -6,8 +6,6 @@ project(HadronycheCore VERSION 0.1.0 LANGUAGES CXX)
 # plug-in, and it provides the SDK's targets. The SDK isn't a submodule here, which would clone it twice.
 
 # Everything is in one include folder. These targets say what each part needs.
-add_library(hadronyche_dsp INTERFACE)
-target_include_directories(hadronyche_dsp INTERFACE include)
 
 # Doesn't need the SDK, because a plug-in's tests use its parameter headers without linking it.
 add_library(hadronyche_params INTERFACE)

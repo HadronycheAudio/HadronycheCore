@@ -72,7 +72,7 @@ constexpr auto kTickInterval = std::chrono::milliseconds (33);
     uint32 PLUGIN_API addRef () override { return 1; }                                        \
     uint32 PLUGIN_API release () override { return 1; }
 
-// A control port has one value per run (), which ParamStore::readChanges treats like a point at offset 0.
+// A control port has one value per run (), which the processor treats like a point at offset 0.
 class OnePointQueue : public Vst::IParamValueQueue
 {
 public:
@@ -240,7 +240,7 @@ public:
             channel.resize (static_cast<size_t> (maxBlock));
 
         // The processor starts on its defaults, so a port holding its default doesn't count as a change. That leaves
-        // those parameters at the exact value from ParamStore, instead of one that went through a float.
+        // those parameters at the exact value the processor holds, instead of one that went through a float.
         for (Vst::ParamID id = 0; id < _info.paramCount; ++id)
         {
             _seenControls[id] = static_cast<float> (_info.getSpec (id).defaultValue);

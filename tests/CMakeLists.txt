@@ -2,7 +2,7 @@
 # means that a change would alter saved projects or the sound of every plug-in using this.
 
 add_executable(HadronycheCoreTests CoreTests.cpp Check.h)
-target_link_libraries(HadronycheCoreTests PRIVATE hadronyche_dsp hadronyche_params)
+target_link_libraries(HadronycheCoreTests PRIVATE hadronyche_params)
 add_test(NAME core COMMAND HadronycheCoreTests)
 
 if(VST3_SDK_DIR)

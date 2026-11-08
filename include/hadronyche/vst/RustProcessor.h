@@ -1,6 +1,6 @@
 #pragma once
 
-#include "hadronyche/dsp/Denormals.h"
+#include "hadronyche/vst/Denormals.h"
 #include "hadronyche/vst/RustPlugin.h"
 
 #include "pluginterfaces/vst/ivstevents.h"
@@ -17,8 +17,8 @@ namespace Hadronyche {
 
 // An audio component whose signal processing is the plug-in's Rust side: a stereo output, a stereo input and an
 // event input when the Rust side says so, 32-bit samples, and the parameters of its table, saved as ParamState.h
-// describes. A plug-in's processor adds its class ID. Everything a host sees is decided here, the same way as in
-// StereoProcessor, and only the parameters' values, the audio, the transport and the notes cross into Rust.
+// describes. A plug-in's processor adds its class ID. Everything a host sees is decided here, and only the
+// parameters' values, the audio, the transport and the notes cross into Rust.
 class RustProcessor : public Steinberg::Vst::AudioEffect
 {
 public:
@@ -42,7 +42,7 @@ public:
         return Steinberg::kResultOk;
     }
 
-    // Once per activation, as StereoProcessor prepared, because what the Rust side does then may not bear repeating.
+    // Once per activation, because what the Rust side does then may not bear repeating.
     // What a host may ask before that, the latency and the tail, gets the sample rate it has set up.
     Steinberg::tresult PLUGIN_API setActive (Steinberg::TBool state) SMTG_OVERRIDE
     {
@@ -214,7 +214,7 @@ private:
         return values;
     }
 
-    // As ParamStore::readChanges: smoothing is the Rust side's, so only the last value in each block is needed.
+    // Smoothing is the Rust side's, so only the last value in each block is needed.
     void readChanges (Steinberg::Vst::IParameterChanges* changes)
     {
         if (!changes)
@@ -313,7 +313,7 @@ private:
     const Ffi::PluginApi* _api;
     void* _instance { nullptr };
 
-    // Written from the host's threads and read on the audio thread, as ParamStore's.
+    // Written from the host's threads and read on the audio thread.
     std::vector<std::atomic<double>> _values;
     std::vector<double> _snapshot;
     std::vector<Ffi::NoteEvent> _notes;
