@@ -222,7 +222,11 @@ void testProcessor ()
     std::printf ("[processor]\n");
     Processor processor;
     check ("latency is nothing before it's prepared", processor.getLatencySamples () == 0);
-    start (processor);
+    processor.initialize (nullptr);
+    Vst::ProcessSetup setup { Vst::kRealtime, Vst::kSample32, kBlockSize, kSampleRate };
+    processor.setupProcessing (setup);
+    check ("and known as soon as the host has said the sample rate", processor.getLatencySamples () == 44);
+    processor.setActive (true);
 
     check ("one audio input", processor.getBusCount (Vst::kAudio, Vst::kInput) == 1);
     check ("one audio output", processor.getBusCount (Vst::kAudio, Vst::kOutput) == 1);

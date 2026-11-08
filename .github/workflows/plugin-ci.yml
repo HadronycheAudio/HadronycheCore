@@ -59,6 +59,12 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure -j 4
 
+      # The Rust side's own tests, which compare it with what only they can see, on this system's maths library too.
+      - name: Test the Rust side
+        if: matrix.config == 'Release' && hashFiles('rust/Cargo.toml') != ''
+        run: cargo test
+        working-directory: rust
+
       - name: Read the version
         id: version
         if: matrix.config == 'Release'
@@ -126,6 +132,11 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Test the Rust side
+        if: hashFiles('rust/Cargo.toml') != ''
+        run: cargo test
+        working-directory: rust
 
       - name: Build the installer
         run: bash external/hadronychecore/tools/macos/make-installer.sh ${{ inputs.name }} "$(sed -n 's/^project(${{ inputs.name }} VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)" build/installer

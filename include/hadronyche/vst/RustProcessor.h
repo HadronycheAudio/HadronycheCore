@@ -42,10 +42,20 @@ public:
         return Steinberg::kResultOk;
     }
 
+    // A host may ask the latency between these two, and the Rust side's answer depends on the sample rate, so it's
+    // prepared at both. A host only sets up a processor that isn't active, so the second time is the one that counts.
+    Steinberg::tresult PLUGIN_API setupProcessing (Steinberg::Vst::ProcessSetup& setup) SMTG_OVERRIDE
+    {
+        const Steinberg::tresult result = AudioEffect::setupProcessing (setup);
+        if (result == Steinberg::kResultOk)
+            prepare ();
+        return result;
+    }
+
     Steinberg::tresult PLUGIN_API setActive (Steinberg::TBool state) SMTG_OVERRIDE
     {
-        if (state && _api)
-            _api->prepare (_instance, processSetup.sampleRate, static_cast<Steinberg::uint32> (processSetup.maxSamplesPerBlock));
+        if (state)
+            prepare ();
 
         return AudioEffect::setActive (state);
     }
@@ -171,6 +181,12 @@ private:
     static constexpr size_t kMaxNotesPerBlock = 1024;
 
     bool hasAudioInput () const { return _api && _api->has_audio_input; }
+
+    void prepare ()
+    {
+        if (_api)
+            _api->prepare (_instance, processSetup.sampleRate, static_cast<Steinberg::uint32> (processSetup.maxSamplesPerBlock));
+    }
 
     // As ParamStore::readChanges: smoothing is the Rust side's, so only the last value in each block is needed.
     void readChanges (Steinberg::Vst::IParameterChanges* changes)
