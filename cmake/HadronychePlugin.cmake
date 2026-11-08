@@ -6,6 +6,8 @@
 # On macOS, a plug-in also has to set CMAKE_OSX_DEPLOYMENT_TARGET before its project (), or it only loads on macOS as
 # new as the build machine.
 
+include("${CMAKE_CURRENT_LIST_DIR}/HadronycheRust.cmake")
+
 # A macro rather than a function, because the SDK's flags and targets have to reach the plug-in's own scope.
 macro(hadronyche_use_vst3_sdk)
     set(CMAKE_CXX_STANDARD 17)
@@ -109,7 +111,7 @@ function(hadronyche_add_audio_unit name au_type au_subtype)
 endfunction()
 
 # The VST3 plug-in target, with its version available as <NAME>_VERSION, and the library's code linked in, and on
-# macOS an Audio Unit target called <name>-au.
+# macOS an Audio Unit target called <name>-au. With a <name>-rust target from hadronyche_add_rust, that's linked in too.
 function(hadronyche_add_plugin name)
     cmake_parse_arguments(PARSE_ARGV 1 PLUGIN "" "AU_TYPE;AU_SUBTYPE" "SOURCES")
 
@@ -125,6 +127,9 @@ function(hadronyche_add_plugin name)
         $<$<PLATFORM_ID:Windows>:NOMINMAX>
     )
     target_link_libraries(${name} PRIVATE sdk vstgui_support hadronyche_dsp hadronyche_vst hadronyche_gui)
+    if(TARGET ${name}-rust)
+        target_link_libraries(${name} PRIVATE ${name}-rust)
+    endif()
 
     # Only the entry points are for a host, and anything else exported could clash with it or with other plug-ins.
     # -z nodelete keeps the plug-in loaded after a host closes it, because Pango's font thread keeps running, and would
@@ -187,6 +192,9 @@ function(hadronyche_add_lv2 name)
     target_include_directories(${name}-lv2 PRIVATE src)
     target_compile_definitions(${name}-lv2 PRIVATE ${upper_name}_VERSION="${PROJECT_VERSION}")
     target_link_libraries(${name}-lv2 PRIVATE sdk vstgui_support hadronyche_dsp hadronyche_vst hadronyche_gui xcb ${CMAKE_DL_LIBS})
+    if(TARGET ${name}-rust)
+        target_link_libraries(${name}-lv2 PRIVATE ${name}-rust)
+    endif()
     # A shared library can link with symbols missing, and then only crash when a host reaches them. No host provides any.
     # -z nodelete for the same reason as the VST3's.
     target_link_options(${name}-lv2 PRIVATE

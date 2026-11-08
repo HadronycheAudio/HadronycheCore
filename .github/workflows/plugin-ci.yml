@@ -46,6 +46,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Configure
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
@@ -108,6 +111,12 @@ jobs:
         with:
           submodules: recursive
 
+      # Both targets, because the plug-in is a universal binary.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
       - name: Configure
         run: cmake -S . -B build -G Xcode
 
@@ -150,6 +159,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install the build's packages
         run: bash external/hadronychecore/tools/linux/install-build-packages.sh
 
@@ -190,12 +202,15 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Install what fetching the code needs
-        run: apt-get update && apt-get install -y git
+      - name: Install what fetching the code and Rust needs
+        run: apt-get update && apt-get install -y git curl
 
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install the build's packages
         run: |

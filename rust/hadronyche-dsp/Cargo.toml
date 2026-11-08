@@ -1,0 +1,10 @@
+[package]
+name = "hadronyche-dsp"
+description = "The signal processing that more than one Hadronyche plug-in needs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]

@@ -47,6 +47,38 @@ jobs:
           cmake -S tools/nulltest -B build-nulltest -G "Visual Studio 17 2022" -A x64 "-DVST3_SDK_DIR=${{ runner.temp }}/vst3sdk"
           cmake --build build-nulltest --config ${{ matrix.config }} -- -m
 
+  rust:
+    name: Rust on ${{ matrix.runner }}
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, windows-2022, macos-15]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check the formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --check
+        working-directory: rust
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: rust
+
+      - name: Test
+        run: cargo test
+        working-directory: rust
+
   macos:
     name: ${{ matrix.runner }}
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository

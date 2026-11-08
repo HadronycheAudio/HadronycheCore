@@ -4,3 +4,4 @@ out/
 .vscode/
 CMakeUserPresets.json
 .idea/
+rust/target/

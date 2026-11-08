@@ -15,6 +15,7 @@ VST is a registered trademark of Steinberg Media Technologies GmbH.
 | `hadronyche_vst` | `hadronyche/vst/` | `SpecParameter`, `ParamStore`, saved parameter state, and the `StereoProcessor` and `SpecController` base classes and `HADRONYCHE_PLUGIN_FACTORY` entry that a plug-in builds on |
 | `hadronyche_gui` | `hadronyche/gui/` | `PanelEditor`, a plug-in window built in code from sections, knobs, menus and toggles that follow their parameters |
 | `hadronyche_testhost` | `hadronyche/testhost/` | A minimal VST 3 host for test programs, which load the built plug-in and drive it the way a host does, with test signals and measurements, and on Windows `PanelWindow`, which drives a plug-in's real panel off-screen. Needs `VST3_SDK_DIR` |
+| `hadronyche-dsp` | `rust/hadronyche-dsp/` | The start of the same signal processing in Rust, as a `no_std` crate that a plug-in's own crate depends on |
 
 ## Using it
 
@@ -29,6 +30,8 @@ hadronyche_add_plugin(MyPlugin AU_TYPE aufx AU_SUBTYPE MyPl SOURCES src/PluginEn
 ```
 
 On Linux, `hadronyche_add_lv2(MyPlugin)` adds an LV2 version built from the same sources, and `hadronyche_add_lv2_tests` compares it with the VST 3.
+
+A plug-in with a Rust side has a crate in `rust/`, built as a static library, which depends on `hadronyche-dsp` by its path in the submodule. `hadronyche_add_rust(MyPlugin)`, before `hadronyche_add_plugin`, has Cargo build it for each configuration and links it into the VST 3 and the LV2, as a universal binary on macOS and with the plug-in's static C runtime on Windows. It needs Rust from [rustup](https://rustup.rs), with both Mac targets on macOS: `rustup target add aarch64-apple-darwin x86_64-apple-darwin`. The crate's exports are declared by hand on the C++ side.
 
 A test program links `hadronyche_testhost`, and none of the plug-in's code, so that it can only see what a host can:
 
