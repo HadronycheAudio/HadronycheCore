@@ -4,7 +4,7 @@
 pub const VOLUME_SILENCE_DB: f64 = -60.0;
 
 pub fn db_to_gain(db: f64) -> f64 {
-    10f64.powf(db / 20.0)
+    crate::pow10(db / 20.0)
 }
 
 pub fn volume_to_gain(db: f64) -> f64 {
