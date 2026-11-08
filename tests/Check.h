@@ -2,8 +2,13 @@
 
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX // Or windows.h's max macro breaks std::max in the headers under test.
+#endif
+#define WIN32_LEAN_AND_MEAN
 #include <crtdbg.h>
 #include <windows.h>
 #endif
