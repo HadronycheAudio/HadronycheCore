@@ -1,9 +1,14 @@
 //! The signal processing that more than one Hadronyche plug-in needs.
 //!
-//! Nothing here allocates or touches the operating system, which `no_std` enforces: everything works on slices and
-//! iterators that the caller owns, so that all of it can run on an audio thread.
+//! Everything here runs on an audio thread, so nothing in it allocates or touches the operating system: it works on
+//! slices and values that the caller owns. It uses `std` only for the float functions, which call the platform's
+//! maths library as the C++ did, so that a port stays bit for bit with what it replaces.
 
-#![no_std]
+mod gain;
+mod smoother;
+
+pub use gain::{VOLUME_SILENCE_DB, db_to_gain, dry_gain, volume_to_gain, wet_gain};
+pub use smoother::Smoother;
 
 /// The loudest sample in a block, across any number of channels, ignoring its sign.
 ///
@@ -22,15 +27,16 @@ mod tests {
 
     #[test]
     fn peak_is_the_loudest_sample_of_any_channel() {
-        assert_eq!(peak([&[0.1, -0.5][..], &[0.2, 0.3][..]]), 0.5);
-        assert_eq!(peak([&[0.1, 0.2][..], &[-0.9, 0.3][..]]), 0.9);
+        let left = [0.1f32, -0.5, 0.2];
+        let right = [0.3f32, 0.4, -0.25];
+        assert_eq!(peak([&left[..], &right[..]]), 0.5);
     }
 
     #[test]
     fn peak_of_nothing_is_silence() {
-        assert_eq!(peak([&[][..], &[][..]]), 0.0);
         let none: [&[f32]; 0] = [];
         assert_eq!(peak(none), 0.0);
+        assert_eq!(peak([&[][..]]), 0.0);
     }
 
     #[test]
