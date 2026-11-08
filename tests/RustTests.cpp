@@ -412,6 +412,7 @@ void testController ()
 
 int main ()
 {
+    failLoudly ();
     testPlugin ();
     testProcessor ();
     testFailure ();

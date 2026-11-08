@@ -222,6 +222,7 @@ void testSignals ()
 
 int main ()
 {
+    failLoudly ();
     testSmoother ();
     testGain ();
     testStepCorrection ();

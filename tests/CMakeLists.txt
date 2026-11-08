@@ -35,6 +35,7 @@ if(VST3_SDK_DIR)
         target_link_libraries(HadronycheCoreRustTests PRIVATE "-framework CoreFoundation")
     endif()
     add_test(NAME core-rust COMMAND HadronycheCoreRustTests)
+    set_tests_properties(core-rust PROPERTIES TIMEOUT 300)
 
     # Only built. Driving a real plug-in takes a real plug-in, so the plug-ins' tests cover what these do.
     add_library(HadronycheCoreVstCheck STATIC VstCheck.cpp)

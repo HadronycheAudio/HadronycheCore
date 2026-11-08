@@ -342,6 +342,7 @@ void testMessages ()
 
 int main ()
 {
+    failLoudly ();
     testWriting ();
     testReading ();
     testParameterText ();
