@@ -128,20 +128,29 @@ public:
         return Steinberg::kResultOk;
     }
 
+    // The parameters, as ParamState.h describes, and then whatever the Rust side saves after them, which it reads
+    // back with the parameters already restored, as a C++ processor with more state did.
     Steinberg::tresult PLUGIN_API setState (Steinberg::IBStream* state) SMTG_OVERRIDE
     {
-        if (!state)
+        if (!state || !restoreParams (state))
             return Steinberg::kResultFalse;
+        if (!_api)
+            return Steinberg::kResultOk;
 
-        return restoreParams (state) ? Steinberg::kResultOk : Steinberg::kResultFalse;
+        std::vector<double> values (_values.size ());
+        for (size_t id = 0; id < values.size (); ++id)
+            values[id] = _values[id];
+        return _api->load_state (_instance, values.data (), readBytes, state) ? Steinberg::kResultOk : Steinberg::kResultFalse;
     }
 
     Steinberg::tresult PLUGIN_API getState (Steinberg::IBStream* state) SMTG_OVERRIDE
     {
-        if (!state)
+        if (!state || !saveParams (state))
             return Steinberg::kResultFalse;
+        if (!_api)
+            return Steinberg::kResultOk;
 
-        return saveParams (state) ? Steinberg::kResultOk : Steinberg::kResultFalse;
+        return _api->save_state (_instance, writeBytes, state) ? Steinberg::kResultOk : Steinberg::kResultFalse;
     }
 
 protected:
@@ -162,7 +171,10 @@ protected:
         processContextRequirements.needTempo ().needTransportState ().needProjectTimeMusic ().needBarPositionMusic ().needTimeSignature ();
     }
 
-    // The parameters alone, for a plug-in that saves more after them.
+    // What the Rust side's Processor::shared gives: the plug-in's own, for its C++ side, or null.
+    const void* shared () const { return _api ? _api->shared (_instance) : nullptr; }
+
+    // The parameters alone.
     bool restoreParams (Steinberg::IBStream* state)
     {
         return RustPlugin::readState (state, [this] (Steinberg::Vst::ParamID id, double value) { _values[id] = value; });
@@ -181,6 +193,21 @@ private:
     static constexpr size_t kMaxNotesPerBlock = 1024;
 
     bool hasAudioInput () const { return _api && _api->has_audio_input; }
+
+    // The Rust side's view of the host's stream.
+    static bool writeBytes (void* stream, const Steinberg::uint8* bytes, size_t count)
+    {
+        Steinberg::int32 written = 0;
+        return static_cast<Steinberg::IBStream*> (stream)->write (const_cast<Steinberg::uint8*> (bytes), static_cast<Steinberg::int32> (count), &written) == Steinberg::kResultOk
+               && written == static_cast<Steinberg::int32> (count);
+    }
+
+    static bool readBytes (void* stream, Steinberg::uint8* bytes, size_t count)
+    {
+        Steinberg::int32 read = 0;
+        return static_cast<Steinberg::IBStream*> (stream)->read (bytes, static_cast<Steinberg::int32> (count), &read) == Steinberg::kResultOk
+               && read == static_cast<Steinberg::int32> (count);
+    }
 
     void prepare ()
     {

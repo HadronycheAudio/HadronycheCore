@@ -2,7 +2,9 @@
 //! so that the library's own tests, in tests/RustTests.cpp, can drive the C++ side against it. The Fail switch makes
 //! it panic, which is how those tests see that a failed instance goes silent.
 
-use hadronyche_plugin::{Block, Curve, Output, ParamSpec, Processor, Tail, export_plugin, params};
+use hadronyche_plugin::{
+    Block, Curve, Output, ParamSpec, Params, Processor, StateReader, StateWriter, Tail, export_plugin, params,
+};
 
 params! {
     pub enum Param => PARAMS {
@@ -14,6 +16,8 @@ params! {
 
 pub struct Example {
     sample_rate: f64,
+    /// Saved after the parameters, and counted up by each block of sound, so that the tests can see state go round.
+    blocks: u32,
 }
 
 impl Processor for Example {
@@ -23,7 +27,10 @@ impl Processor for Example {
     const HAS_AUDIO_INPUT: bool = true;
 
     fn new() -> Self {
-        Self { sample_rate: 0.0 }
+        Self {
+            sample_rate: 0.0,
+            blocks: 0,
+        }
     }
 
     fn prepare(&mut self, sample_rate: f64, _max_block_size: usize) {
@@ -43,6 +50,7 @@ impl Processor for Example {
             return Output::Silence;
         }
 
+        self.blocks += 1;
         let gain = 10f32.powf(gain_db as f32 / 20.0);
         let mono = block.params.plain(Param::Mode) > 0.5;
         let [out_left, out_right] = block.output;
@@ -71,6 +79,26 @@ impl Processor for Example {
 
     fn tail(&self) -> Tail {
         Tail::Infinite
+    }
+
+    // The block count, as four bytes after the parameters. A state saved before there was one, such as the tests'
+    // hand-written ones, ends before it, and reads as zero.
+    fn save_state(&self, out: &mut dyn StateWriter) -> bool {
+        out.write(&self.blocks.to_le_bytes())
+    }
+
+    fn load_state(&mut self, _params: &Params<'_>, input: &mut dyn StateReader) -> bool {
+        let mut bytes = [0u8; 4];
+        self.blocks = if input.read(&mut bytes) {
+            u32::from_le_bytes(bytes)
+        } else {
+            0
+        };
+        true
+    }
+
+    fn shared(&self) -> *const core::ffi::c_void {
+        (&raw const self.blocks).cast()
     }
 
     fn migrate_param(index: usize, normalized: f64, version: i32) -> f64 {

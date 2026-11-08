@@ -11,7 +11,7 @@ mod step;
 mod svf;
 
 pub use gain::{VOLUME_SILENCE_DB, db_to_gain, dry_gain, volume_to_gain, wet_gain};
-pub use power::{pow2, pow10};
+pub use power::{pow2, pow2_f32, pow10};
 pub use smoother::Smoother;
 pub use step::step_correction;
 pub use svf::{SvfCoefficients, SvfMode, SvfState, SvfTaps, svf_coefficients, svf_output, svf_tick, svf_warp};

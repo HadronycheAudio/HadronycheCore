@@ -15,6 +15,11 @@ pub fn pow10(x: f64) -> f64 {
     black_box(10.0f64).powf(x)
 }
 
+/// 2 to the power of x in single precision, as the C library's `powf` computes it, for the C++'s `std::pow (2.0f, x)`.
+pub fn pow2_f32(x: f32) -> f32 {
+    black_box(2.0f32).powf(x)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -25,5 +30,6 @@ mod tests {
         assert_eq!(pow2(-1.0), 0.5);
         assert_eq!(pow10(3.0), 1000.0);
         assert_eq!(pow10(-2.0), 0.01);
+        assert_eq!(pow2_f32(3.0), 8.0);
     }
 }

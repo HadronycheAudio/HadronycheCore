@@ -24,6 +24,9 @@ class Processor : public RustProcessor
 {
 public:
     Processor () : RustProcessor (FUID ()) {}
+
+    // The example shares its count of blocks with sound.
+    uint32 blocksShared () const { return shared () ? *static_cast<const uint32*> (shared ()) : 0xFFFFFFFFu; }
 };
 
 class Controller : public RustController
@@ -352,16 +355,36 @@ void testState ()
     {
         MemoryStream stream;
         check ("it saves", processor.getState (&stream) == kResultOk);
-        const auto expected = savedState (2, 3, { { 0, gainNormalized (0.0) }, { 1, 0.0 }, { 2, 0.0 } });
-        check ("the defaults, in the saved format at the Rust side's version", bytesOf (stream) == expected);
+        auto expected = savedState (2, 3, { { 0, gainNormalized (0.0) }, { 1, 0.0 }, { 2, 0.0 } });
+        expected.insert (expected.end (), { 0, 0, 0, 0 });
+        check ("the defaults, in the saved format at the Rust side's version, then what it saves after them", bytesOf (stream) == expected);
+    }
+    {
+        check ("the shared pointer is the plug-in's own", processor.blocksShared () == 0);
+        Block block (0.5f, -0.25f);
+        block.run (processor);
+        block.run (processor);
+        check ("and follows the instance", processor.blocksShared () == 2);
+
+        MemoryStream saved;
+        processor.getState (&saved);
+        Processor restored;
+        start (restored);
+        MemoryStream stream;
+        fill (stream, bytesOf (saved));
+        check ("another instance restores the state after the parameters", restored.setState (&stream) == kResultOk && restored.blocksShared () == 2);
+        restored.setActive (false);
+        restored.terminate ();
     }
     {
         MemoryStream stream;
         fill (stream, savedState (1, 2, { { 0, 0.25 }, { 1, 1.0 } }));
-        check ("it restores an older version", processor.setState (&stream) == kResultOk);
+        check ("it restores an older version, which ends before what's saved after the parameters", processor.setState (&stream) == kResultOk);
+        check ("and that reads as nothing", processor.blocksShared () == 0);
         MemoryStream saved;
         processor.getState (&saved);
-        const auto expected = savedState (2, 3, { { 0, 0.75 }, { 1, 1.0 }, { 2, 0.0 } });
+        auto expected = savedState (2, 3, { { 0, 0.75 }, { 1, 1.0 }, { 2, 0.0 } });
+        expected.insert (expected.end (), { 0, 0, 0, 0 });
         check ("with its values converted by the Rust side", bytesOf (saved) == expected);
         // Gain at 0.75 is -10.5 dB, and Mode at 1 is mono.
         Block block (0.5f, -0.25f);

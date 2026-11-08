@@ -11,10 +11,15 @@ use core::ptr;
 use core::slice;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use crate::{Curve, NoteEvent, Output, Params, Processor, Tail, Transport};
+use crate::{Curve, NoteEvent, Output, Params, Processor, StateReader, StateWriter, Tail, Transport};
 
 /// Goes up with any change to the structs or functions here. The C++ side refuses a plug-in with another one.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
+
+/// The C++ side's stream, for `save_state`: writes all of the bytes, or returns false.
+pub type WriteBytes = unsafe extern "C" fn(stream: *mut c_void, bytes: *const u8, count: usize) -> bool;
+/// The C++ side's stream, for `load_state`: fills all of the bytes, or returns false.
+pub type ReadBytes = unsafe extern "C" fn(stream: *mut c_void, bytes: *mut u8, count: usize) -> bool;
 
 /// What `process` returns: a bit per output channel that holds silence, as a VST3 host's silence flags.
 pub const SILENT_LEFT: u32 = 1;
@@ -82,6 +87,20 @@ pub struct PluginApi {
     pub tail: unsafe extern "C" fn(instance: *mut c_void) -> u32,
     /// Runs one block, and returns which output channels hold silence. Audio thread only, and never allocates.
     pub process: unsafe extern "C" fn(instance: *mut c_void, block: *const ProcessBlock) -> u32,
+
+    /// Writes what the plug-in saves after its parameters, through `write` with `stream`, and returns false if
+    /// anything failed. From the host's thread.
+    pub save_state: unsafe extern "C" fn(instance: *mut c_void, write: WriteBytes, stream: *mut c_void) -> bool,
+    /// Reads it back, with the parameters' normalized values as just restored, one per parameter. From the host's
+    /// thread.
+    pub load_state: unsafe extern "C" fn(
+        instance: *mut c_void,
+        normalized: *const f64,
+        read: ReadBytes,
+        stream: *mut c_void,
+    ) -> bool,
+    /// Something of the plug-in's own, for its C++ side, or null. Valid for as long as the instance is.
+    pub shared: unsafe extern "C" fn(instance: *mut c_void) -> *const c_void,
 }
 
 impl PluginApi {
@@ -102,6 +121,9 @@ impl PluginApi {
             latency: latency::<P>,
             tail: tail::<P>,
             process: process::<P>,
+            save_state: save_state::<P>,
+            load_state: load_state::<P>,
+            shared: shared::<P>,
         }
     }
 }
@@ -261,6 +283,68 @@ unsafe extern "C" fn tail<P: Processor>(instance: *mut c_void) -> u32 {
             Tail::Infinite => INFINITE_TAIL,
         })
     }
+}
+
+struct Stream<F> {
+    function: F,
+    stream: *mut c_void,
+}
+
+impl StateWriter for Stream<WriteBytes> {
+    fn write(&mut self, bytes: &[u8]) -> bool {
+        // SAFETY: the C++ side gave the function with the stream it works on.
+        unsafe { (self.function)(self.stream, bytes.as_ptr(), bytes.len()) }
+    }
+}
+
+impl StateReader for Stream<ReadBytes> {
+    fn read(&mut self, bytes: &mut [u8]) -> bool {
+        // SAFETY: as above, and the buffer is the caller's, of the length given.
+        unsafe { (self.function)(self.stream, bytes.as_mut_ptr(), bytes.len()) }
+    }
+}
+
+unsafe extern "C" fn save_state<P: Processor>(instance: *mut c_void, write: WriteBytes, stream: *mut c_void) -> bool {
+    let mut out = Stream {
+        function: write,
+        stream,
+    };
+    // A failed instance saves nothing after the parameters, which a project can still be saved with.
+    // SAFETY: as with says.
+    unsafe { with::<P, bool>(instance, true, |instance| instance.processor.save_state(&mut out)) }
+}
+
+unsafe extern "C" fn load_state<P: Processor>(
+    instance: *mut c_void,
+    normalized: *const f64,
+    read: ReadBytes,
+    stream: *mut c_void,
+) -> bool {
+    if normalized.is_null() && !P::PARAMS.is_empty() {
+        return false;
+    }
+    // SAFETY: the caller gives one normalized value per parameter.
+    let normalized = unsafe {
+        if P::PARAMS.is_empty() {
+            &[][..]
+        } else {
+            slice::from_raw_parts(normalized, P::PARAMS.len())
+        }
+    };
+    let mut input = Stream { function: read, stream };
+    // SAFETY: as with says.
+    unsafe {
+        with::<P, bool>(instance, true, |instance| {
+            instance
+                .processor
+                .load_state(&Params::new(P::PARAMS, normalized), &mut input)
+        })
+    }
+}
+
+unsafe extern "C" fn shared<P: Processor>(instance: *mut c_void) -> *const c_void {
+    // SAFETY: as with says.
+    unsafe { with::<P, *const c_void>(instance, ptr::null(), |instance| instance.processor.shared()) }
 }
 
 unsafe extern "C" fn process<P: Processor>(instance: *mut c_void, block: *const ProcessBlock) -> u32 {

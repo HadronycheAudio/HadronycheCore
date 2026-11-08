@@ -17,8 +17,9 @@ mod processor;
 
 pub use param::{Curve, ParamId, ParamSpec, Params};
 pub use processor::{
-    Block, NoteEvent, NoteKind, Output, Processor, TRANSPORT_BAR_POSITION_VALID, TRANSPORT_PLAYING,
-    TRANSPORT_PROJECT_TIME_MUSIC_VALID, TRANSPORT_TEMPO_VALID, TRANSPORT_TIME_SIGNATURE_VALID, Tail, Transport,
+    Block, NoteEvent, NoteKind, Output, Processor, StateReader, StateWriter, TRANSPORT_BAR_POSITION_VALID,
+    TRANSPORT_PLAYING, TRANSPORT_PROJECT_TIME_MUSIC_VALID, TRANSPORT_TEMPO_VALID, TRANSPORT_TIME_SIGNATURE_VALID, Tail,
+    Transport,
 };
 
 /// A plug-in's parameters: an enum of their IDs, in the order the host sees and projects save, each with its

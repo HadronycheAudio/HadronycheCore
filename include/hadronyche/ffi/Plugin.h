@@ -10,7 +10,7 @@ namespace Hadronyche {
 namespace Ffi {
 
 /// Goes up with any change to the structs or functions here. The C++ side refuses a plug-in with another one.
-constexpr static const uint32_t ABI_VERSION = 1;
+constexpr static const uint32_t ABI_VERSION = 2;
 
 /// What `process` returns: a bit per output channel that holds silence, as a VST3 host's silence flags.
 constexpr static const uint32_t SILENT_LEFT = 1;
@@ -111,6 +111,12 @@ struct ProcessBlock {
   uint32_t note_count;
 };
 
+/// The C++ side's stream, for `save_state`: writes all of the bytes, or returns false.
+using WriteBytes = bool(*)(void *stream, const uint8_t *bytes, uintptr_t count);
+
+/// The C++ side's stream, for `load_state`: fills all of the bytes, or returns false.
+using ReadBytes = bool(*)(void *stream, uint8_t *bytes, uintptr_t count);
+
 /// Everything the C++ side calls. An instance is the pointer that `create` returns, which only these functions
 /// understand, and every function takes a null one, or a failed one, and does nothing.
 struct PluginApi {
@@ -133,6 +139,14 @@ struct PluginApi {
   uint32_t (*tail)(void *instance);
   /// Runs one block, and returns which output channels hold silence. Audio thread only, and never allocates.
   uint32_t (*process)(void *instance, const ProcessBlock *block);
+  /// Writes what the plug-in saves after its parameters, through `write` with `stream`, and returns false if
+  /// anything failed. From the host's thread.
+  bool (*save_state)(void *instance, WriteBytes write, void *stream);
+  /// Reads it back, with the parameters' normalized values as just restored, one per parameter. From the host's
+  /// thread.
+  bool (*load_state)(void *instance, const double *normalized, ReadBytes read, void *stream);
+  /// Something of the plug-in's own, for its C++ side, or null. Valid for as long as the instance is.
+  const void *(*shared)(void *instance);
 };
 
 }  // namespace Ffi

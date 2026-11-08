@@ -46,6 +46,39 @@ pub trait Processor: Send + 'static {
         let _ = (index, version);
         normalized
     }
+
+    /// Whatever the plug-in saves after its parameters, as ParamState.h's layout has room for. From the host's
+    /// thread, not the audio thread, and it may allocate. Nothing by default.
+    fn save_state(&self, out: &mut dyn StateWriter) -> bool {
+        let _ = out;
+        true
+    }
+
+    /// Reads back what `save_state` wrote, after the parameters have been restored and with their values, which an
+    /// older project's state may not have. The stream ends where the parameters ended for a state saved before the
+    /// plug-in saved anything more, and that has to read as nothing. From the host's thread, and it may allocate.
+    fn load_state(&mut self, params: &Params<'_>, input: &mut dyn StateReader) -> bool {
+        let _ = (params, input);
+        true
+    }
+
+    /// Something of the plug-in's own that its C++ side reaches through `RustProcessor::shared ()`, such as what its
+    /// panel reads, for as long as the instance lives. Null by default.
+    fn shared(&self) -> *const core::ffi::c_void {
+        core::ptr::null()
+    }
+}
+
+/// Where `save_state` writes: the host's stream, through the C++ side.
+pub trait StateWriter {
+    /// All of `bytes`, or false.
+    fn write(&mut self, bytes: &[u8]) -> bool;
+}
+
+/// Where `load_state` reads: the host's stream, through the C++ side.
+pub trait StateReader {
+    /// Fills all of `bytes`, or returns false, which a stream that has ended does.
+    fn read(&mut self, bytes: &mut [u8]) -> bool;
 }
 
 /// What a processor returns for a block.
