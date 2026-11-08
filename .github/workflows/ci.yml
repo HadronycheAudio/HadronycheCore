@@ -98,9 +98,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # The tests drive RustProcessor against the example crate.
+      # The tests drive RustProcessor against the example crate, built for both architectures as a plug-in's is.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
 
       - name: Fetch the SDK
         run: git clone --branch "$SDK_TAG" --depth 1 --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git "$RUNNER_TEMP/vst3sdk"
@@ -109,7 +111,7 @@ jobs:
         run: cmake -S . -B build -G Xcode "-DVST3_SDK_DIR=$RUNNER_TEMP/vst3sdk" "-DSMTG_CODE_SIGN_IDENTITY_MAC=-" "-DSMTG_XCODE_OTHER_CODE_SIGNING_FLAGS="
 
       - name: Build
-        run: cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreVstCheck HadronycheCoreGuiCheck HadronycheCoreHostCheck
+        run: cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreRustTests HadronycheCoreVstCheck HadronycheCoreGuiCheck HadronycheCoreHostCheck
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
@@ -128,6 +130,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The tests drive RustProcessor against the example crate.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install the build's packages
         run: bash tools/linux/install-build-packages.sh
 
@@ -139,7 +145,7 @@ jobs:
         run: cmake -S . -B build -G Ninja "-DCMAKE_BUILD_TYPE=${{ matrix.config }}" "-DVST3_SDK_DIR=$RUNNER_TEMP/vst3sdk"
 
       - name: Build
-        run: cmake --build build --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreVstCheck HadronycheCoreGuiCheck HadronycheCoreHostCheck
+        run: cmake --build build --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreRustTests HadronycheCoreVstCheck HadronycheCoreGuiCheck HadronycheCoreHostCheck
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
