@@ -14,7 +14,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use crate::{Curve, NoteEvent, Output, Params, Processor, StateReader, StateWriter, Tail, Transport};
 
 /// Goes up with any change to the structs or functions here. The C++ side refuses a plug-in with another one.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 /// The C++ side's stream, for `save_state`: writes all of the bytes, or returns false.
 pub type WriteBytes = unsafe extern "C" fn(stream: *mut c_void, bytes: *const u8, count: usize) -> bool;
@@ -85,8 +85,9 @@ pub struct PluginApi {
     /// With one normalized value per parameter, as they stand.
     pub prepare:
         unsafe extern "C" fn(instance: *mut c_void, sample_rate: f64, max_block_size: u32, normalized: *const f64),
-    pub latency: unsafe extern "C" fn(instance: *mut c_void) -> u32,
-    pub tail: unsafe extern "C" fn(instance: *mut c_void) -> u32,
+    /// Both with the sample rate the host has set up, which it may ask about before activating the plug-in.
+    pub latency: unsafe extern "C" fn(instance: *mut c_void, sample_rate: f64) -> u32,
+    pub tail: unsafe extern "C" fn(instance: *mut c_void, sample_rate: f64) -> u32,
     /// Runs one block, and returns which output channels hold silence. Audio thread only, and never allocates.
     pub process: unsafe extern "C" fn(instance: *mut c_void, block: *const ProcessBlock) -> u32,
 
@@ -290,15 +291,15 @@ unsafe extern "C" fn prepare<P: Processor>(
     }
 }
 
-unsafe extern "C" fn latency<P: Processor>(instance: *mut c_void) -> u32 {
+unsafe extern "C" fn latency<P: Processor>(instance: *mut c_void, sample_rate: f64) -> u32 {
     // SAFETY: as with says.
-    unsafe { with::<P, u32>(instance, 0, |instance| instance.processor.latency()) }
+    unsafe { with::<P, u32>(instance, 0, |instance| instance.processor.latency(sample_rate)) }
 }
 
-unsafe extern "C" fn tail<P: Processor>(instance: *mut c_void) -> u32 {
+unsafe extern "C" fn tail<P: Processor>(instance: *mut c_void, sample_rate: f64) -> u32 {
     // SAFETY: as with says.
     unsafe {
-        with::<P, u32>(instance, 0, |instance| match instance.processor.tail() {
+        with::<P, u32>(instance, 0, |instance| match instance.processor.tail(sample_rate) {
             Tail::Samples(samples) => samples.min(INFINITE_TAIL - 1),
             Tail::Infinite => INFINITE_TAIL,
         })
@@ -526,7 +527,7 @@ mod tests {
             Output::Sound
         }
 
-        fn latency(&self) -> u32 {
+        fn latency(&self, _sample_rate: f64) -> u32 {
             7
         }
     }
@@ -651,7 +652,7 @@ mod tests {
     #[test]
     fn a_panic_fails_the_instance_for_good() {
         let instance = prepared(16);
-        assert_eq!(unsafe { (API.latency)(instance) }, 7);
+        assert_eq!(unsafe { (API.latency)(instance, 48000.0) }, 7);
         let mut buffers = Buffers::new(3);
         let block = buffers.block(2.0, &[], false);
         assert_eq!(unsafe { (API.process)(instance, &block) }, SILENT);
@@ -664,7 +665,7 @@ mod tests {
             "silent from then on"
         );
         assert_eq!(buffers.output[0], [0.0; 3]);
-        assert_eq!(unsafe { (API.latency)(instance) }, 0);
+        assert_eq!(unsafe { (API.latency)(instance, 48000.0) }, 0);
         unsafe { (API.destroy)(instance) };
     }
 
@@ -684,8 +685,8 @@ mod tests {
         let block = buffers.block(0.0, &[], false);
         unsafe {
             assert_eq!((API.process)(ptr::null_mut(), &block), SILENT);
-            assert_eq!((API.latency)(ptr::null_mut()), 0);
-            assert_eq!((API.tail)(ptr::null_mut()), 0);
+            assert_eq!((API.latency)(ptr::null_mut(), 48000.0), 0);
+            assert_eq!((API.tail)(ptr::null_mut(), 48000.0), 0);
             (API.prepare)(ptr::null_mut(), 48000.0, 64, [0.0f64].as_ptr());
             (API.destroy)(ptr::null_mut());
         }

@@ -42,16 +42,8 @@ public:
         return Steinberg::kResultOk;
     }
 
-    // A host may ask the latency between these two, and the Rust side's answer depends on the sample rate, so it's
-    // prepared at both. A host only sets up a processor that isn't active, so the second time is the one that counts.
-    Steinberg::tresult PLUGIN_API setupProcessing (Steinberg::Vst::ProcessSetup& setup) SMTG_OVERRIDE
-    {
-        const Steinberg::tresult result = AudioEffect::setupProcessing (setup);
-        if (result == Steinberg::kResultOk)
-            prepare ();
-        return result;
-    }
-
+    // Once per activation, as StereoProcessor prepared, because what the Rust side does then may not bear repeating.
+    // What a host may ask before that, the latency and the tail, gets the sample rate it has set up.
     Steinberg::tresult PLUGIN_API setActive (Steinberg::TBool state) SMTG_OVERRIDE
     {
         if (state)
@@ -75,12 +67,15 @@ public:
         return symbolicSampleSize == Steinberg::Vst::kSample32 ? Steinberg::kResultTrue : Steinberg::kResultFalse;
     }
 
-    Steinberg::uint32 PLUGIN_API getLatencySamples () SMTG_OVERRIDE { return _api ? _api->latency (_instance) : 0; }
+    Steinberg::uint32 PLUGIN_API getLatencySamples () SMTG_OVERRIDE
+    {
+        return _api ? _api->latency (_instance, processSetup.sampleRate) : 0;
+    }
 
     Steinberg::uint32 PLUGIN_API getTailSamples () SMTG_OVERRIDE
     {
         static_assert (Ffi::INFINITE_TAIL == Steinberg::Vst::kInfiniteTail);
-        return _api ? _api->tail (_instance) : 0;
+        return _api ? _api->tail (_instance, processSetup.sampleRate) : 0;
     }
 
     Steinberg::tresult PLUGIN_API process (Steinberg::Vst::ProcessData& data) SMTG_OVERRIDE

@@ -72,12 +72,12 @@ impl Processor for Example {
         Output::Sound
     }
 
-    fn latency(&self) -> u32 {
-        // Something a test can see change with the sample rate.
-        (self.sample_rate / 1000.0) as u32
+    fn latency(&self, sample_rate: f64) -> u32 {
+        // Something a test can see change with the sample rate, before the plug-in is active.
+        (sample_rate / 1000.0) as u32
     }
 
-    fn tail(&self) -> Tail {
+    fn tail(&self, _sample_rate: f64) -> Tail {
         Tail::Infinite
     }
 

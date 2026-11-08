@@ -10,7 +10,7 @@ namespace Hadronyche {
 namespace Ffi {
 
 /// Goes up with any change to the structs or functions here. The C++ side refuses a plug-in with another one.
-constexpr static const uint32_t ABI_VERSION = 3;
+constexpr static const uint32_t ABI_VERSION = 4;
 
 /// What `process` returns: a bit per output channel that holds silence, as a VST3 host's silence flags.
 constexpr static const uint32_t SILENT_LEFT = 1;
@@ -139,8 +139,9 @@ struct PluginApi {
                   double sample_rate,
                   uint32_t max_block_size,
                   const double *normalized);
-  uint32_t (*latency)(void *instance);
-  uint32_t (*tail)(void *instance);
+  /// Both with the sample rate the host has set up, which it may ask about before activating the plug-in.
+  uint32_t (*latency)(void *instance, double sample_rate);
+  uint32_t (*tail)(void *instance, double sample_rate);
   /// Runs one block, and returns which output channels hold silence. Audio thread only, and never allocates.
   uint32_t (*process)(void *instance, const ProcessBlock *block);
   /// Writes what the plug-in saves after its parameters, through `write` with `stream`, and returns false if

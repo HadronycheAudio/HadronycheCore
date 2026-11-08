@@ -23,21 +23,25 @@ pub trait Processor: Send + 'static {
 
     fn new() -> Self;
 
-    /// Before the first block, and again each time the host activates the plug-in, with the host's values for the
-    /// parameters as they stand, so that nothing ramps from elsewhere when sound starts. Blocks are never longer
-    /// than `max_block_size`.
+    /// Each time the host activates the plug-in, before its first block, with the host's values for the parameters
+    /// as they stand, so that nothing ramps from elsewhere when sound starts. Once per activation, and not before,
+    /// because what it does may not bear repeating, such as drawing a random start. Blocks are never longer than
+    /// `max_block_size`.
     fn prepare(&mut self, sample_rate: f64, max_block_size: usize, params: &Params<'_>);
 
     /// One block. Its output starts with whatever the host left there.
     fn process(&mut self, block: Block<'_>) -> Output;
 
-    /// How many samples late the output is, which the host compensates for.
-    fn latency(&self) -> u32 {
+    /// How many samples late the output is, which the host compensates for. A host may ask before it activates the
+    /// plug-in, so the sample rate it has set up comes with the question.
+    fn latency(&self, sample_rate: f64) -> u32 {
+        let _ = sample_rate;
         0
     }
 
     /// How long the output goes on after the input stops.
-    fn tail(&self) -> Tail {
+    fn tail(&self, sample_rate: f64) -> Tail {
+        let _ = sample_rate;
         Tail::Samples(0)
     }
 

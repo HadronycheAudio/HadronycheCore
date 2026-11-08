@@ -224,7 +224,7 @@ void testProcessor ()
 {
     std::printf ("[processor]\n");
     Processor processor;
-    check ("latency is nothing before it's prepared", processor.getLatencySamples () == 0);
+    check ("latency follows the sample rate the SDK starts with", processor.getLatencySamples () == 44);
     processor.initialize (nullptr);
     Vst::ProcessSetup setup { Vst::kRealtime, Vst::kSample32, kBlockSize, kSampleRate };
     processor.setupProcessing (setup);
