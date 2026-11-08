@@ -177,10 +177,11 @@ std::string ascii (const Vst::TChar* string)
     return text;
 }
 
-// Gain's normalized value for a level in dB, over its -60 to 6 range.
+// Gain's normalized value for a level in dB, through the same conversion as the processor's defaults, because under
+// the SDK's /fp:fast the same formula written out here rounds differently in its last bit.
 double gainNormalized (double db)
 {
-    return (db + 60.0) / 66.0;
+    return plainToNormalized (RustPlugin::getSpec (Example::kGain), db);
 }
 
 void testPlugin ()
