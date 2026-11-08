@@ -140,9 +140,10 @@ function(_hadronyche_rust_native_libraries out_libraries)
     file(WRITE "${probe_dir}/Cargo.toml"
         "[package]\nname = \"probe\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\ncrate-type = [\"staticlib\"]\n\n[workspace]\n")
     file(WRITE "${probe_dir}/src/lib.rs" "pub fn probe() {}\n")
+    # Without colour, because CI sets CARGO_TERM_COLOR=always, and the escape codes would end up in the link.
     execute_process(
-        COMMAND "${HADRONYCHE_CARGO}" rustc --quiet --manifest-path "${probe_dir}/Cargo.toml" --target ${HADRONYCHE_RUST_HOST}
-            --target-dir "${probe_dir}/target" -- --print=native-static-libs
+        COMMAND "${HADRONYCHE_CARGO}" rustc --quiet --color never --manifest-path "${probe_dir}/Cargo.toml"
+            --target ${HADRONYCHE_RUST_HOST} --target-dir "${probe_dir}/target" -- --print=native-static-libs
         RESULT_VARIABLE result
         OUTPUT_VARIABLE output
         ERROR_VARIABLE errors
@@ -151,6 +152,11 @@ function(_hadronyche_rust_native_libraries out_libraries)
         message(FATAL_ERROR "rustc didn't say which libraries it needs: ${errors}")
     endif()
     string(REPLACE " " ";" libraries "${CMAKE_MATCH_1}")
+    foreach(library ${libraries})
+        if(NOT library MATCHES "^[-_./a-zA-Z0-9]*$")
+            message(FATAL_ERROR "rustc's list of libraries has something other than a library in it: ${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
 
     set(result_libraries)
     set(framework_next FALSE)
