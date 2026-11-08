@@ -4,7 +4,7 @@ Guidance for coding agents working in this repository. Read [Rules that protect 
 
 HadronycheCore is the code shared by the Hadronyche VST® 3 plug-ins: DiffusionDelay, LoopTexturer, PartialResynth and RabidPhatt. It uses the Steinberg VST3 SDK and VSTGUI directly. JUCE was deliberately rejected, so don't introduce it.
 
-It only holds what more than one plug-in needs, and it isn't a framework. Single-use code stays in its plug-in until a second one needs it. Anything that defines a saved project also stays in the plug-in: parameter IDs and tables, label lists, class IDs and `AppId`.
+It holds what more than one plug-in needs, and the frame that a plug-in's Rust processor fits into: `rust/hadronyche-plugin` on the Rust side, and `RustProcessor` and `RustController` on the C++ side, which carry it into the VST3, the Audio Unit and the LV2. Single-use code stays in its plug-in until a second one needs it. Anything that defines a saved project also stays in the plug-in: parameter IDs and tables, label lists, class IDs and `AppId`.
 
 `README.md` covers using it.
 
@@ -17,14 +17,14 @@ Windows x64 with Visual Studio 2022 and CMake 3.25 or newer is where this is dev
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DVST3_SDK_DIR=<path to a VST3 SDK>
 
 # Build and run the tests
-cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreVstCheck HadronycheCoreGuiCheck HadronycheCoreHostCheck
+cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreRustTests HadronycheCoreVstCheck HadronycheCoreGuiCheck HadronycheCoreHostCheck
 ctest --test-dir build -C Release --output-on-failure
 
 # Work on the library and a plug-in together, from the plug-in's folder
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DHADRONYCHE_CORE_DIR=<path to this folder>
 ```
 
-The Rust side in `rust/` has its own checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`, run from that folder, which CI runs on all three systems.
+The Rust side in `rust/` has its own checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`, run from that folder, which CI runs on all three systems. The parts using the SDK need Rust as well, because `HadronycheCoreRustTests` drives `RustProcessor` against `rust/hadronyche-example`. `cargo test` also checks that `include/hadronyche/ffi/Plugin.h` and `tests/ExampleParamIds.h` are what the Rust side generates, and `HADRONYCHE_UPDATE_HEADERS=1 cargo test` rewrites them.
 
 There's no linter or formatter for the C++.
 
@@ -37,7 +37,8 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 ### Saved projects
 
 - **Don't change what `normalizedToPlain` and `plainToNormalized` calculate for an existing `Curve`.** Hosts store values normalized to 0..1, so this silently changes what saved projects sound like. Add a new curve instead, and only at the end of the enum's list if its order ever comes to matter.
-- **Don't change the saved format in `ParamState.h`.** Saved projects hold exactly these bytes. A plug-in's own additions go after the parameters, and a plug-in converts old values in the reader it passes in, because the version is per plug-in.
+- **Don't change the saved format in `ParamState.h`.** Saved projects hold exactly these bytes. A plug-in's own additions go after the parameters, and a plug-in converts old values in the reader it passes in, because the version is per plug-in. A Rust plug-in's version is its `STATE_VERSION`, and it converts in `migrate_param`, which `RustPlugin::readState` calls for every saved value.
+- **A Rust plug-in's parameter IDs are the order of its `params!` enum,** and its generated `ParamIds.h` repeats them for the C++ side. Only ever add at the end, as with a C++ table. The Rust `Curve` has the C++ one's numbers, which `Plugin.h` fixes and `RustPlugin` checks at compile time.
 - **Only ever add to the end of `SvfMode`.** Plug-ins cast saved parameter values to it.
 - **Don't change the expected values in `tests/` to make a test pass.** They're written out by hand on purpose, and a failure means that saved projects or the sound would change.
 
@@ -46,7 +47,9 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 `ParamStore::readChanges` and everything in `hadronyche/dsp/` run on the audio thread, in every plug-in.
 
 - **No allocation, locks, file access, system calls or anything else that can block.** The failure is audio dropouts that may not show up in testing.
-- **`rust/hadronyche-dsp` stays `no_std`,** so that nothing in it can allocate or reach the operating system. A plug-in's own crate exports plain `extern "C"` functions over slices that the caller owns, and nothing crosses that boundary that could panic.
+- **`rust/hadronyche-dsp` stays `no_std`,** so that nothing in it can allocate or reach the operating system. `Processor::process` has the same rules, and nothing checks them: a plug-in sizes everything in `prepare`.
+- **Every entry into Rust goes through `rust/hadronyche-plugin/src/ffi.rs`, which catches panics,** because unwinding into C++ is undefined. After one, that instance gives silence for good, and the rest of the plug-in goes on, which `HadronycheCoreRustTests` checks. A panic still means a bug.
+- **`ffi.rs` copies the input before the processor sees it, and cuts a block longer than `prepare` said into pieces,** because a host may give the same memory as input and output, and Rust's two views of a block must never overlap, and a processor sizes its buffers from `prepare`. Don't hand the host's pointers to a processor directly.
 
 ### Sound
 
@@ -95,7 +98,8 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 - **Keep `SMTG_USE_STATIC_CRT` on, in `cmake/HadronychePlugin.cmake`.** Without it, a plug-in fails to load on PCs without Microsoft's runtime, and neither the tests nor CI would notice, because that runtime is on those machines. Check a change there with `dumpbin /dependents` on a Release DLL from a fresh build folder, because a cached value overrides the default.
 - **`hadronyche_use_vst3_sdk` has to stay a macro.** The SDK's flags and targets have to reach the plug-in's own scope.
 - **`hadronyche_add_lv2` builds from the VST3 target's own sources,** so a plug-in calls it after `hadronyche_add_plugin`, and a source added to the VST3 reaches the LV2 by itself.
-- **A plug-in's Rust side always builds from the submodule,** because its crate depends on `rust/hadronyche-dsp` by that path, and Cargo can't redirect a path dependency. `hadronyche_add_rust` stops when `HADRONYCHE_CORE_DIR` holds a different `rust/`, so to work on both together, point the plug-in's submodule at the commit here.
+- **A plug-in's Rust side always builds from the submodule,** because its crate depends on `rust/hadronyche-plugin` and `rust/hadronyche-dsp` by that path, and Cargo can't redirect a path dependency. `hadronyche_add_rust` stops when `HADRONYCHE_CORE_DIR` holds a different `rust/`, so to work on both together, point the plug-in's submodule at the commit here.
+- **`include/hadronyche/ffi/Plugin.h` is generated, and `ABI_VERSION` in `ffi.rs` goes up with any change to what's in it.** `cargo test` fails when the header is out of date, and `RustPlugin` treats a Rust side built against another version as a plug-in without parameters, which a plug-in's tests see at once. A plug-in's `ParamIds.h` is generated the same way, by its own `cargo test`.
 - **The Rust static library links with the plug-in's own C runtime and GCC runtime.** `hadronyche_add_rust` builds it with `crt-static` to match `SMTG_USE_STATIC_CRT`, and leaves the runtime, and `gcc_s`, out of the libraries that rustc asks for, because the plug-in's link already has them. Check a change there with `dumpbin /dependents` and `ldd`, as for `SMTG_USE_STATIC_CRT`.
 - **On macOS, the Rust library is built for both architectures and joined with `lipo`,** because Xcode builds the plug-in universal and Rust has no universal target. `tools/macos/test-installer.sh` checks both slices of the result.
 - **A plug-in's `ci.yml` pins a commit of `plugin-ci.yml` here, separately from its submodule.** The jobs run the scripts from the submodule, so the two have to agree: move both together.
@@ -120,13 +124,17 @@ People use these plug-ins in real projects. A change here can reach the saved pr
 | `hadronyche_gui` | SDK, VSTGUI | `PanelEditor` |
 | `hadronyche_testhost` | SDK headers | A VST3 host for test programs, with signals, measurements and a runner, on Windows `PanelWindow`, and on Linux `testPanelOpens` |
 | `hadronyche_add_lv2` | SDK, VSTGUI, lv2-dev | On Linux, a plug-in's LV2 version: `src/lv2/Lv2Wrapper.cpp` around its VST3 classes, `src/lv2/Ui.cpp` around its panel, VST3 messages between them through `src/lv2/Message.cpp`, with Turtle generated by `src/lv2/TurtleMain.cpp` |
-| `hadronyche-dsp` | Rust | `rust/hadronyche-dsp`, a `no_std` crate with the start of the signal processing in Rust, which a plug-in's own crate in its `rust/` depends on, and `cmake/HadronycheRust.cmake` builds into the plug-in with `hadronyche_add_rust` |
+| `hadronyche-dsp` | Rust | `rust/hadronyche-dsp`, a `no_std` crate with the signal processing shared in Rust, which a plug-in's own crate depends on |
+| `hadronyche-plugin` | Rust | `rust/hadronyche-plugin`: the `Processor` trait, `params!`, `export_plugin!` and the C ABI in `ffi.rs`, which `include/hadronyche/ffi/Plugin.h` is generated from. `rust/hadronyche-example` is a gain that the tests drive through it |
+| `hadronyche_add_rust` | Rust, Cargo | `cmake/HadronycheRust.cmake` builds a plug-in's crate into its VST3, LV2 and Turtle generator, as `RustPlugin.h`, `RustProcessor.h` and `RustController.h` in `hadronyche_vst` expect |
 
 `.github/workflows/plugin-ci.yml` is every plug-in's CI, which each calls with its name and Audio Unit codes. `tools/windows/` tests a plug-in's Windows installer on CI, `tools/macos/` builds its `.pkg` installer and tests it, `tools/linux/` does the same for its tarballs, `tools/nulltest/` compares two builds, on Windows and Linux, `tools/lv2compare/` compares a plug-in's LV2 with its VST3, and `tools/lv2panel/` compares their panels.
 
 - **The LV2 wrapper:** a plug-in provides `src/lv2/PluginInfo.cpp`, and calls `hadronyche_add_lv2` and `hadronyche_add_lv2_tests`. It has audio, MIDI, control ports, state, latency, transport and the plug-in's own panel. With `hasMessagePorts`, it also carries the VST3 messages between the processor and the panel, through the ports `ui_in` and `ui_out`, and the plug-in can give `hadronyche_add_lv2` `LINKS` sources that change what passes, as LoopTexturer's `src/lv2/LooperLink.cpp` does.
 
-- **`StereoProcessor` and `SpecController`:** a plug-in's processor and controller derive from these, with their class IDs and `Parameters.h`. The processor provides `prepareDsp` and `renderBlock`, which gets each stereo block after the parameter changes are taken and denormals are flushed, and overrides `initialize`, `setState` or `getState` for an event input or more state, calling `restoreParams` and `saveParams`. `PluginEntry.cpp` is one `HADRONYCHE_PLUGIN_FACTORY` line.
+- **`RustProcessor`, `RustController` and `RustPlugin`:** a plug-in with its processing in Rust derives its processor and controller from the first two, adding only its class IDs and its editor. `RustPlugin` reaches the Rust side through `hadronyche_plugin ()`, the one symbol that `export_plugin!` exports, and gives its parameter table as `ParamSpec`s, so `RustPlugin::getSpec` goes wherever a C++ plug-in's `getParamSpec` went: the panel and `PluginInfo`. The processor keeps the parameters' normalized values, as `ParamStore` does, and hands each block a snapshot of them, the audio, the transport and the notes. Everything a host sees, from buses to state bytes, is decided on the C++ side, the same way as in `StereoProcessor`.
+
+- **`StereoProcessor` and `SpecController`:** a plug-in with its processing in C++ derives its processor and controller from these, with their class IDs and `Parameters.h`. The processor provides `prepareDsp` and `renderBlock`, which gets each stereo block after the parameter changes are taken and denormals are flushed, and overrides `initialize`, `setState` or `getState` for an event input or more state, calling `restoreParams` and `saveParams`. `PluginEntry.cpp` is one `HADRONYCHE_PLUGIN_FACTORY` line.
 
 - **`PanelEditor`:** a plug-in provides `buildPanel`, and optionally `onSync` and `onClose`. A control's tag is its parameter's ID, and tags from the parameter count upwards are the plug-in's own, which only `valueChanged` handles.
 - **The test host:** a plug-in's `Plug` derives from `PlugBase`, and adds what its own features need. `paramText`, `paramFromText`, `readAt`, `nearly` and `setStateBytes` are what every plug-in's compatibility and state tests use. Measurements that differ between plug-ins stay in them, such as each `measureFrequency`.
@@ -141,6 +149,6 @@ Each plug-in pins its own version of this library, so a change only arrives when
    - Build `tools/nulltest` once, and keep that binary for both sides of the comparison. It uses only the SDK's interfaces.
    - `tools/nulltest/dump-plugin.sh <NullTest> <tests program> <.vst3 bundle> <NAME> <folder>` dumps a build: classes, buses, parameters and their text, saved state, how it reads old and damaged state, rendered audio and, on Windows only, the panel. `NAME` is the start of the plug-in's `<NAME>_SCREENSHOTS` variable.
    - Output differs between platforms, so only compare builds from the same platform.
-   - `tools/nulltest/compare.py <old folder> <new folder>` compares two dumps bit for bit.
+   - `tools/nulltest/compare.py <old folder> <new folder>` compares two dumps bit for bit. `--audio-tolerance -120` lets audio through whose peak difference is at or below that level, for a change that can't be bit for bit, such as a port to Rust whose maths library rounds differently, and still says how far off it is.
    - LoopTexturer's panel test runs against the clock, so add `--panel-ignore 215,185,965,305 --panel-tolerance 700` for it, and look at its panels by eye. Run the old build twice first, to see what varies by itself.
 4. **Test it in Cubase** if you can, or say clearly that you couldn't. Nothing here measures how it sounds.

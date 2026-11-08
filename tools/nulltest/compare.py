@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Compares two folders dumped by dump-plugin.sh, and exits with 0 only if they match.
 
-Usage: compare.py <baseline folder> <folder to check> [--limit N]
+Usage: compare.py <baseline folder> <folder to check> [--limit N] [--audio-tolerance DBFS]
                   [--panel-ignore x0,y0,x1,y1]... [--panel-tolerance PIXELS]
 
 Audio is compared bit for bit. Where it differs, this reports how much by, relative to full scale,
 because the SDK builds with /fp:fast, which allows tiny differences that are still worth knowing about.
+With --audio-tolerance, a difference whose peak is at or below that level, such as -120, counts as a
+match and is only noted. That's for a change that can't be bit for bit, such as the same arithmetic
+through another language's maths library, and the note says how far off it is.
 
 Panel screenshots are exact by default. The panel tests run in real time, so a panel showing something
 that moves needs its region ignored, and its few redrawn pixels allowed for with a tolerance. Anything
@@ -33,13 +36,14 @@ def read(path):
 
 
 def describe_audio(a, b):
+    """Returns what differs, and the peak difference in dBFS, or None where nothing is comparable."""
     left = array.array("f")
     right = array.array("f")
     left.frombytes(a[: len(a) // 4 * 4])
     right.frombytes(b[: len(b) // 4 * 4])
 
     if len(left) != len(right):
-        return f"different lengths: {len(left)} and {len(right)} values"
+        return f"different lengths: {len(left)} and {len(right)} values", None
 
     differing = 0
     first = -1
@@ -58,13 +62,15 @@ def describe_audio(a, b):
             worst = max(worst, difference)
 
     if differing == 0:
-        return "the same values, with different NaN or zero bit patterns"
+        return "the same values, with different NaN or zero bit patterns", -math.inf
 
-    level = "silence" if worst == 0.0 else f"{20.0 * math.log10(worst):.1f} dBFS"
+    peak = -math.inf if worst == 0.0 else 20.0 * math.log10(worst)
+    level = "silence" if worst == 0.0 else f"{peak:.1f} dBFS"
     text = f"{differing} of {len(left)} values differ, first at frame {first // 2}, peak difference {level}"
     if only_nan_in_one:
         text += f", {only_nan_in_one} where only one side is NaN or infinite"
-    return text
+        peak = None
+    return text, peak
 
 
 def compare_bitmaps(a, b, ignore):
@@ -101,6 +107,7 @@ def main():
     arguments = sys.argv[1:]
     limit = 40
     tolerance = 0
+    audio_tolerance = None
     ignore = []
 
     def take(flag):
@@ -113,6 +120,8 @@ def main():
         limit = int(take("--limit"))
     while "--panel-tolerance" in arguments:
         tolerance = int(take("--panel-tolerance"))
+    while "--audio-tolerance" in arguments:
+        audio_tolerance = float(take("--audio-tolerance"))
     while "--panel-ignore" in arguments:
         ignore.append(tuple(int(part) for part in take("--panel-ignore").split(",")))
 
@@ -142,7 +151,12 @@ def main():
         if a == b:
             same += 1
         elif name.endswith(".f32"):
-            problems.append(f"AUDIO    {name}: {describe_audio(a, b)}")
+            text, peak = describe_audio(a, b)
+            if audio_tolerance is not None and peak is not None and peak <= audio_tolerance:
+                same += 1
+                notes.append(f"note     {name}: {text}")
+            else:
+                problems.append(f"AUDIO    {name}: {text}")
         elif name.endswith(".bmp"):
             count, area = compare_bitmaps(a, b, ignore)
             if count < 0:

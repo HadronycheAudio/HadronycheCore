@@ -161,6 +161,17 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # The Rust side's own checks, once, including the test that keeps its generated header current.
+      - name: Check the Rust side
+        if: matrix.config == 'Release' && hashFiles('rust/Cargo.toml') != ''
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+        working-directory: rust
 
       - name: Install the build's packages
         run: bash external/hadronychecore/tools/linux/install-build-packages.sh

@@ -1,0 +1,15 @@
+[package]
+name = "hadronyche-example"
+description = "A gain, as the Rust side of a plug-in, which the library's own tests drive through RustProcessor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+hadronyche-dsp = { path = "../hadronyche-dsp" }
+hadronyche-plugin = { path = "../hadronyche-plugin" }

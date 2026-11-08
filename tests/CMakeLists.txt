@@ -24,6 +24,18 @@ if(VST3_SDK_DIR)
     endif()
     add_test(NAME core-vst COMMAND HadronycheCoreVstTests)
 
+    # RustProcessor and RustController, driven against the example crate, built the way a plug-in's Rust side is.
+    # ExampleParamIds.h is generated from that crate by cargo test, like a plug-in's.
+    include("${CMAKE_SOURCE_DIR}/cmake/HadronycheRust.cmake")
+    hadronyche_add_rust_library(HadronycheExample-rust "${CMAKE_SOURCE_DIR}/rust/Cargo.toml" hadronyche-example)
+    add_executable(HadronycheCoreRustTests RustTests.cpp Check.h ExampleParamIds.h "${VST3_SDK_DIR}/public.sdk/source/common/memorystream.cpp")
+    target_compile_definitions(HadronycheCoreRustTests PRIVATE UNICODE _UNICODE NOMINMAX)
+    target_link_libraries(HadronycheCoreRustTests PRIVATE hadronyche_vst HadronycheExample-rust)
+    if(APPLE)
+        target_link_libraries(HadronycheCoreRustTests PRIVATE "-framework CoreFoundation")
+    endif()
+    add_test(NAME core-rust COMMAND HadronycheCoreRustTests)
+
     # Only built. Driving a real plug-in takes a real plug-in, so the plug-ins' tests cover what these do.
     add_library(HadronycheCoreVstCheck STATIC VstCheck.cpp)
     target_compile_definitions(HadronycheCoreVstCheck PRIVATE UNICODE _UNICODE NOMINMAX)

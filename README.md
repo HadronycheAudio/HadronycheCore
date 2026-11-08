@@ -2,7 +2,7 @@
 
 Code shared by the Hadronyche VST® 3 plug-ins: [DiffusionDelay](https://github.com/HadronycheAudio/DiffusionDelay), [LoopTexturer](https://github.com/HadronycheAudio/LoopTexturer), [PartialResynth](https://github.com/HadronycheAudio/PartialResynth) and [RabidPhatt](https://github.com/HadronycheAudio/RabidPhatt).
 
-It isn't a framework, and it only holds what more than one plug-in needs. It's for Windows x64 with Visual Studio 2022, and macOS on Intel and Apple Silicon with Xcode, using CMake 3.25 or newer and the VST 3 SDK, in C++17.
+It holds what more than one plug-in needs, and the frame that a plug-in's Rust processor fits into. It's for Windows x64 with Visual Studio 2022, and macOS on Intel and Apple Silicon with Xcode, using CMake 3.25 or newer and the VST 3 SDK, in C++17.
 
 VST is a registered trademark of Steinberg Media Technologies GmbH.
 
@@ -15,7 +15,8 @@ VST is a registered trademark of Steinberg Media Technologies GmbH.
 | `hadronyche_vst` | `hadronyche/vst/` | `SpecParameter`, `ParamStore`, saved parameter state, and the `StereoProcessor` and `SpecController` base classes and `HADRONYCHE_PLUGIN_FACTORY` entry that a plug-in builds on |
 | `hadronyche_gui` | `hadronyche/gui/` | `PanelEditor`, a plug-in window built in code from sections, knobs, menus and toggles that follow their parameters |
 | `hadronyche_testhost` | `hadronyche/testhost/` | A minimal VST 3 host for test programs, which load the built plug-in and drive it the way a host does, with test signals and measurements, and on Windows `PanelWindow`, which drives a plug-in's real panel off-screen. Needs `VST3_SDK_DIR` |
-| `hadronyche-dsp` | `rust/hadronyche-dsp/` | The start of the same signal processing in Rust, as a `no_std` crate that a plug-in's own crate depends on |
+| `hadronyche-dsp` | `rust/hadronyche-dsp/` | The signal processing shared in Rust, as a `no_std` crate that a plug-in's own crate depends on |
+| `hadronyche-plugin` | `rust/hadronyche-plugin/` | The `Processor` trait that a plug-in's Rust side implements, `params!` for its parameter table, and `export_plugin!`, which exports it over a C ABI. `hadronyche/ffi/Plugin.h` is generated from it, and `hadronyche/vst/RustProcessor.h` and `RustController.h` are the VST 3 classes on top |
 
 ## Using it
 
@@ -31,7 +32,7 @@ hadronyche_add_plugin(MyPlugin AU_TYPE aufx AU_SUBTYPE MyPl SOURCES src/PluginEn
 
 On Linux, `hadronyche_add_lv2(MyPlugin)` adds an LV2 version built from the same sources, and `hadronyche_add_lv2_tests` compares it with the VST 3.
 
-A plug-in with a Rust side has a crate in `rust/`, built as a static library, which depends on `hadronyche-dsp` by its path in the submodule. `hadronyche_add_rust(MyPlugin)`, before `hadronyche_add_plugin`, has Cargo build it for each configuration and links it into the VST 3 and the LV2, as a universal binary on macOS and with the plug-in's static C runtime on Windows. It needs Rust from [rustup](https://rustup.rs), with both Mac targets on macOS: `rustup target add aarch64-apple-darwin x86_64-apple-darwin`. The crate's exports are declared by hand on the C++ side.
+A plug-in with its processing in Rust has a crate in `rust/`, built as a static library, which depends on `hadronyche-plugin` and `hadronyche-dsp` by their paths in the submodule. It describes its parameters with `params!`, implements `Processor`, and ends with `export_plugin!`. On the C++ side, its processor and controller derive from `RustProcessor` and `RustController`, adding their class IDs and the editor, and `RustPlugin::getSpec` is its parameter table. `hadronyche_add_rust(MyPlugin)`, before `hadronyche_add_plugin`, has Cargo build the crate for each configuration and links it into the VST 3, the LV2 and its Turtle generator, as a universal binary on macOS and with the plug-in's static C runtime on Windows. It needs Rust from [rustup](https://rustup.rs), with both Mac targets on macOS: `rustup target add aarch64-apple-darwin x86_64-apple-darwin`. The plug-in's `ParamIds.h`, for its tests and panel, is generated from its `params!` by its own `cargo test`, which `HADRONYCHE_UPDATE_HEADERS=1` makes write it.
 
 A test program links `hadronyche_testhost`, and none of the plug-in's code, so that it can only see what a host can:
 
@@ -54,9 +55,11 @@ To test the library, which needs an SDK checkout for the parts using the SDK:
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DVST3_SDK_DIR=<path to a VST3 SDK>
-cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreVstCheck HadronycheCoreGuiCheck HadronycheCoreHostCheck
+cmake --build build --config Release --target HadronycheCoreTests HadronycheCoreVstTests HadronycheCoreRustTests HadronycheCoreVstCheck HadronycheCoreGuiCheck HadronycheCoreHostCheck
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+The Rust side has `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` in `rust/`, and the SDK tests need Rust too, for the example crate they drive.
 
 The expected values in `tests/` are written out by hand on purpose. Don't change one to make a test pass, because a failure means that saved projects or the sound would change.
 

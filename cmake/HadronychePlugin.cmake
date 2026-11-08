@@ -209,13 +209,19 @@ function(hadronyche_add_lv2 name)
         LIBRARY_OUTPUT_DIRECTORY "${bundle}"
     )
 
+    # The parameter table comes from src/Parameters.cpp, or from the Rust side when the plug-in has one.
     add_executable(${name}-lv2-turtle
         "${HADRONYCHE_CORE_DIR}/src/lv2/TurtleMain.cpp"
         src/lv2/PluginInfo.cpp
-        src/Parameters.cpp
     )
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/Parameters.cpp")
+        target_sources(${name}-lv2-turtle PRIVATE src/Parameters.cpp)
+    endif()
     target_include_directories(${name}-lv2-turtle PRIVATE src)
     target_link_libraries(${name}-lv2-turtle PRIVATE sdk hadronyche_dsp hadronyche_vst)
+    if(TARGET ${name}-rust)
+        target_link_libraries(${name}-lv2-turtle PRIVATE ${name}-rust)
+    endif()
     add_custom_command(TARGET ${name}-lv2 POST_BUILD
         COMMAND ${name}-lv2-turtle "${bundle}" "${name}.so"
         VERBATIM

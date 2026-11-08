@@ -3,9 +3,9 @@
 #   hadronyche_add_rust (MyPlugin)
 #
 # before hadronyche_add_plugin, which links the target <name>-rust into the VST3, as hadronyche_add_lv2 does into the
-# LV2. The crate is a staticlib called <name> in lower case, and the symbols it exports are declared by hand on the
-# C++ side. It needs Rust from https://rustup.rs, and on macOS both targets: rustup target add aarch64-apple-darwin
-# x86_64-apple-darwin.
+# LV2 and its Turtle generator. The crate is a staticlib called <name> in lower case, and the symbol it exports is the
+# one that export_plugin! defines, which include/hadronyche/ffi/Plugin.h declares. It needs Rust from
+# https://rustup.rs, and on macOS both targets: rustup target add aarch64-apple-darwin x86_64-apple-darwin.
 #
 # The crate depends on the library's crates by their path in the submodule, because Cargo can't redirect a path
 # dependency, so the Rust side always builds from external/hadronychecore. With HADRONYCHE_CORE_DIR pointing elsewhere,
@@ -19,6 +19,13 @@ function(hadronyche_add_rust name)
     endif()
 
     _hadronyche_rust_check_submodule()
+    hadronyche_add_rust_library(${name}-rust "${manifest}" "${crate}")
+endfunction()
+
+# The target <target>, which links the static library that Cargo builds of <package> from <manifest>, with the system
+# libraries it needs. hadronyche_add_rust is this for a plug-in, and the library's own tests use it for the example
+# crate in its workspace.
+function(hadronyche_add_rust_library target manifest package)
     _hadronyche_rust_find_tools()
 
     # The plug-in is a universal binary on macOS, built by Xcode from its standard architectures, and Rust has no
@@ -44,10 +51,12 @@ function(hadronyche_add_rust name)
     set(profile "$<IF:$<CONFIG:Debug>,dev,release>")
     set(profile_dir "$<IF:$<CONFIG:Debug>,debug,release>")
     set(target_dir "${CMAKE_BINARY_DIR}/cargo")
+    # Cargo names the file after the package, with underscores.
+    string(REPLACE "-" "_" file_stem "${package}")
     if(WIN32)
-        set(file "${crate}.lib")
+        set(file "${file_stem}.lib")
     else()
-        set(file "lib${crate}.a")
+        set(file "lib${file_stem}.a")
     endif()
     set(output_dir "${CMAKE_BINARY_DIR}/rust/$<CONFIG>")
     set(output "${output_dir}/${file}")
@@ -56,7 +65,8 @@ function(hadronyche_add_rust name)
     set(slices)
     foreach(triple ${triples})
         list(APPEND commands COMMAND ${CMAKE_COMMAND} -E env ${environment}
-            "${HADRONYCHE_CARGO}" build --manifest-path "${manifest}" --target ${triple} --target-dir "${target_dir}" --profile ${profile})
+            "${HADRONYCHE_CARGO}" build --manifest-path "${manifest}" --package "${package}" --target ${triple}
+            --target-dir "${target_dir}" --profile ${profile})
         list(APPEND slices "${target_dir}/${triple}/${profile_dir}/${file}")
     endforeach()
     list(LENGTH triples triple_count)
@@ -67,17 +77,17 @@ function(hadronyche_add_rust name)
     endif()
 
     # Cargo tracks the crate's own sources, so it runs on every build and does nothing when nothing changed.
-    add_custom_target(${name}-rust-build
+    add_custom_target(${target}-build
         ${commands}
         BYPRODUCTS "${output}"
-        COMMENT "Building the Rust side of ${name}"
+        COMMENT "Building ${package} with Cargo"
         VERBATIM
     )
 
     _hadronyche_rust_native_libraries(native_libraries)
-    add_library(${name}-rust INTERFACE)
-    target_link_libraries(${name}-rust INTERFACE "${output}" ${native_libraries})
-    add_dependencies(${name}-rust ${name}-rust-build)
+    add_library(${target} INTERFACE)
+    target_link_libraries(${target} INTERFACE "${output}" ${native_libraries})
+    add_dependencies(${target} ${target}-build)
 endfunction()
 
 # Stops when HADRONYCHE_CORE_DIR's rust/ isn't the submodule's, which is what the Rust side builds from.

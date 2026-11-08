@@ -1,9 +1,6 @@
-# The Rust side of the library. A plug-in's own crate, in its rust/ folder, depends on these by their path in its
-# submodule, and cmake/HadronycheRust.cmake builds that crate into the plug-in.
-
 [workspace]
 resolver = "3"
-members = ["hadronyche-dsp"]
+members = ["hadronyche-dsp", "hadronyche-plugin", "hadronyche-example"]
 
 [workspace.package]
 version = "0.1.0"

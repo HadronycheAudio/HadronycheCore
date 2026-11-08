@@ -1,0 +1,24 @@
+# How tests/plugin_header.rs makes include/hadronyche/ffi/Plugin.h from src/ffi.rs and src/processor.rs.
+
+language = "C++"
+pragma_once = true
+namespaces = ["Hadronyche", "Ffi"]
+include_version = false
+documentation = true
+documentation_style = "c++"
+sys_includes = ["cstdint"]
+no_includes = true
+header = """// The C side of a plug-in's Rust processor, which RustPlugin.h and RustProcessor.h call through. Generated from
+// rust/hadronyche-plugin by cargo test there, so don't edit it here: change the Rust, and run
+// HADRONYCHE_UPDATE_HEADERS=1 cargo test in rust/ to bring this up to date."""
+trailer = """// The one symbol a plug-in's Rust side exports, from its export_plugin!.
+extern "C" const Hadronyche::Ffi::PluginApi* hadronyche_plugin ();"""
+
+[export]
+include = ["PluginApi", "ProcessBlock", "ParamInfo", "Transport", "NoteEvent", "NoteKind", "Curve"]
+
+[enum]
+derive_const_casts = false
+
+[parse]
+parse_deps = false
