@@ -15,7 +15,7 @@ VST is a registered trademark of Steinberg Media Technologies GmbH.
 | `hadronyche_vst` | `hadronyche/vst/` | `SpecParameter`, `ParamStore`, saved parameter state, and the `StereoProcessor` and `SpecController` base classes and `HADRONYCHE_PLUGIN_FACTORY` entry that a plug-in builds on |
 | `hadronyche_gui` | `hadronyche/gui/` | `PanelEditor`, a plug-in window built in code from sections, knobs, menus and toggles that follow their parameters |
 | `hadronyche_testhost` | `hadronyche/testhost/` | A minimal VST 3 host for test programs, which load the built plug-in and drive it the way a host does, with test signals and measurements, and on Windows `PanelWindow`, which drives a plug-in's real panel off-screen. Needs `VST3_SDK_DIR` |
-| `hadronyche-dsp` | `rust/hadronyche-dsp/` | The signal processing shared in Rust, `Smoother`, the gain laws and `peak`, which a plug-in's own crate depends on |
+| `hadronyche-dsp` | `rust/hadronyche-dsp/` | The signal processing shared in Rust: `Smoother`, the gain laws, `step_correction`, the state-variable filter kernel and `peak`, which a plug-in's own crate depends on |
 | `hadronyche-plugin` | `rust/hadronyche-plugin/` | The `Processor` trait that a plug-in's Rust side implements, `params!` for its parameter table, and `export_plugin!`, which exports it over a C ABI. `hadronyche/ffi/Plugin.h` is generated from it, and `hadronyche/vst/RustProcessor.h` and `RustController.h` are the VST 3 classes on top |
 
 ## Using it
