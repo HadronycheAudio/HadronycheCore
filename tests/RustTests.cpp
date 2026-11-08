@@ -153,15 +153,15 @@ std::vector<char> savedState (int32 version, int32 count, const std::vector<std:
     return bytes;
 }
 
-MemoryStream streamOf (const std::vector<char>& bytes)
+// Into a stream the caller owns, because MemoryStream copies shallowly, and a copy and its original would free the
+// same memory.
+void fill (MemoryStream& stream, const std::vector<char>& bytes)
 {
-    MemoryStream stream;
     int32 written = 0;
     int64 position = 0;
     if (!bytes.empty ())
         stream.write (const_cast<char*> (bytes.data ()), static_cast<int32> (bytes.size ()), &written);
     stream.seek (0, IBStream::kIBSeekSet, &position);
-    return stream;
 }
 
 std::vector<char> bytesOf (MemoryStream& stream)
@@ -352,7 +352,8 @@ void testState ()
         check ("the defaults, in the saved format at the Rust side's version", bytesOf (stream) == expected);
     }
     {
-        auto stream = streamOf (savedState (1, 2, { { 0, 0.25 }, { 1, 1.0 } }));
+        MemoryStream stream;
+        fill (stream, savedState (1, 2, { { 0, 0.25 }, { 1, 1.0 } }));
         check ("it restores an older version", processor.setState (&stream) == kResultOk);
         MemoryStream saved;
         processor.getState (&saved);
@@ -364,9 +365,11 @@ void testState ()
         check ("and the Rust side gets them", block.outputIs (0.125f * 0.29853826f, 0.125f * 0.29853826f, 1e-5f));
     }
     {
-        auto stream = streamOf (savedState (2, 2, { { 7, 0.5 }, { 1, 0.0 } }));
+        MemoryStream stream;
+        fill (stream, savedState (2, 2, { { 7, 0.5 }, { 1, 0.0 } }));
         check ("an unknown parameter is skipped", processor.setState (&stream) == kResultOk);
-        auto newer = streamOf (savedState (3, 0, {}));
+        MemoryStream newer;
+        fill (newer, savedState (3, 0, {}));
         check ("a newer version is refused", processor.setState (&newer) != kResultOk);
         MemoryStream empty;
         check ("and so is nothing", processor.setState (&empty) != kResultOk);
@@ -400,7 +403,8 @@ void testController ()
     check ("a list shows its label", ascii (text) == "Mono");
     checkNear ("plain values convert", controller.normalizedParamToPlain (Example::kGain, 0.5), -27.0);
 
-    auto stream = streamOf (savedState (1, 1, { { 0, 0.25 } }));
+    MemoryStream stream;
+    fill (stream, savedState (1, 1, { { 0, 0.25 } }));
     check ("it takes the component's state", controller.setComponentState (&stream) == kResultOk);
     checkNear ("converted the same way as the processor's", controller.getParamNormalized (Example::kGain), 0.75);
     check ("no view without an editor", controller.createView (Vst::ViewType::kEditor) == nullptr);
