@@ -17,6 +17,8 @@ VST is a registered trademark of Steinberg Media Technologies GmbH.
 | `hadronyche-dsp` | `rust/hadronyche-dsp/` | The signal processing shared between the plug-ins: `Smoother`, the gain laws, `step_correction`, the state-variable filter kernel, `pow2` and `peak`, which each plug-in's crate depends on |
 | `hadronyche-plugin` | `rust/hadronyche-plugin/` | The `Processor` trait that a plug-in's Rust side implements, `params!` for its parameter table, and `export_plugin!`, which exports it over a C ABI. `hadronyche/ffi/Plugin.h` is generated from it, and `hadronyche/vst/RustProcessor.h` and `RustController.h` are the VST 3 classes on top |
 
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the whole system with diagrams: the library, the four plug-ins, the Rust and C++ sides, the FFI boundary, the formats, the build, CI and tests, and the seams towards a framework.
+
 ## Using it
 
 A plug-in has this as a submodule at `external/hadronychecore`, and `cmake/HadronychePlugin.cmake` does the rest. It sets up the SDK, adds this library after it so that it builds with the plug-in's flags and runtime, and links it:
