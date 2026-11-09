@@ -2,7 +2,7 @@
 
 Code shared by the Hadronyche VST® 3 plug-ins: [DiffusionDelay](https://github.com/HadronycheAudio/DiffusionDelay), [LoopTexturer](https://github.com/HadronycheAudio/LoopTexturer), [PartialResynth](https://github.com/HadronycheAudio/PartialResynth) and [RabidPhatt](https://github.com/HadronycheAudio/RabidPhatt).
 
-It holds what more than one plug-in needs, and the frame that a plug-in's Rust processor fits into. It's for Windows x64 with Visual Studio 2022, and macOS on Intel and Apple Silicon with Xcode, using CMake 3.25 or newer and the VST 3 SDK, in C++17.
+It holds what more than one plug-in needs, and the frame that a plug-in's Rust processor fits into. It's for Windows x64 with Visual Studio 2022, macOS on Intel and Apple Silicon with Xcode, and Linux x86_64 with GCC or Clang, where it also builds a plug-in's LV2 version. It uses CMake 3.25 or newer, Rust from rustup and the VST 3 SDK, in C++17.
 
 VST is a registered trademark of Steinberg Media Technologies GmbH.
 
