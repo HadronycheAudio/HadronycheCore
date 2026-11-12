@@ -65,16 +65,23 @@ jobs:
         run: cargo test
         working-directory: rust
 
+      # A tag is `v` and the version in CMakeLists.txt, or that and a suffix, such as v1.5.0-alpha.1, for a pre-release.
+      # The installers are named after the whole tag, so that a pre-release's files can be told from the release's.
       - name: Read the version
         id: version
         if: matrix.config == 'Release'
         run: |
           $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(${{ inputs.name }} VERSION ([0-9.]+)').Matches[0].Groups[1].Value
-          "version=$version" >> $env:GITHUB_OUTPUT
-          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
-            Write-Output "::error::The tag $env:GITHUB_REF_NAME doesn't match the version in CMakeLists.txt, which is $version"
-            exit 1
+          $release = $version
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:GITHUB_REF_NAME -like "v$version-?*") {
+              $release = $env:GITHUB_REF_NAME.Substring(1)
+            } elseif ($env:GITHUB_REF_NAME -ne "v$version") {
+              Write-Output "::error::The tag $env:GITHUB_REF_NAME doesn't match the version in CMakeLists.txt, which is $version"
+              exit 1
+            }
           }
+          "version=$release" >> $env:GITHUB_OUTPUT
 
       - name: Build the installer
         if: matrix.config == 'Release'
@@ -138,8 +145,24 @@ jobs:
         run: cargo test
         working-directory: rust
 
+      # A tag is `v` and the version in CMakeLists.txt, or that and a suffix, such as v1.5.0-alpha.1, for a pre-release.
+      # The installers are named after the whole tag, so that a pre-release's files can be told from the release's.
+      - name: Read the version
+        id: version
+        run: |
+          version=$(sed -n 's/^project(${{ inputs.name }} VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          release=$version
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            case "$GITHUB_REF_NAME" in
+              "v$version") ;;
+              "v$version-"?*) release=${GITHUB_REF_NAME#v} ;;
+              *) echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in CMakeLists.txt, which is $version"; exit 1 ;;
+            esac
+          fi
+          echo "version=$release" >> "$GITHUB_OUTPUT"
+
       - name: Build the installer
-        run: bash external/hadronychecore/tools/macos/make-installer.sh ${{ inputs.name }} "$(sed -n 's/^project(${{ inputs.name }} VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)" build/installer
+        run: bash external/hadronychecore/tools/macos/make-installer.sh ${{ inputs.name }} "${{ steps.version.outputs.version }}" build/installer
 
       - name: Test the installer
         run: bash external/hadronychecore/tools/macos/test-installer.sh ${{ inputs.name }} build/installer/*.pkg build/bin/Release/validator build/bin/Release/${{ inputs.name }}Tests ${{ inputs.au_type }} ${{ inputs.au_subtype }} 10.15
@@ -247,14 +270,30 @@ jobs:
       - name: Build
         run: cmake --build build --target ${{ inputs.name }}Tests ${{ inputs.name }} ${{ inputs.name }}Lv2Compare
 
+      # A tag is `v` and the version in CMakeLists.txt, or that and a suffix, such as v1.5.0-alpha.1, for a pre-release.
+      # The installers are named after the whole tag, so that a pre-release's files can be told from the release's.
+      - name: Read the version
+        id: version
+        run: |
+          version=$(sed -n 's/^project(${{ inputs.name }} VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          release=$version
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            case "$GITHUB_REF_NAME" in
+              "v$version") ;;
+              "v$version-"?*) release=${GITHUB_REF_NAME#v} ;;
+              *) echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in CMakeLists.txt, which is $version"; exit 1 ;;
+            esac
+          fi
+          echo "version=$release" >> "$GITHUB_OUTPUT"
+
       - name: Build the tarball
-        run: bash external/hadronychecore/tools/linux/make-tarball.sh ${{ inputs.name }} "$(sed -n 's/^project(${{ inputs.name }} VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)" build/installer
+        run: bash external/hadronychecore/tools/linux/make-tarball.sh ${{ inputs.name }} "${{ steps.version.outputs.version }}" build/installer
 
       - name: Test the tarball
         run: xvfb-run -a bash external/hadronychecore/tools/linux/test-tarball.sh ${{ inputs.name }} build/installer/*-x86_64.tar.gz build/bin/Release/validator build/bin/Release/${{ inputs.name }}Tests 2.35
 
       - name: Build the LV2 tarball
-        run: bash external/hadronychecore/tools/linux/make-lv2-tarball.sh ${{ inputs.name }} "$(sed -n 's/^project(${{ inputs.name }} VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)" build/installer
+        run: bash external/hadronychecore/tools/linux/make-lv2-tarball.sh ${{ inputs.name }} "${{ steps.version.outputs.version }}" build/installer
 
       - name: Test the LV2 tarball
         run: bash external/hadronychecore/tools/linux/test-lv2-tarball.sh ${{ inputs.name }} build/installer/*-LV2.tar.gz build/installer/*-x86_64.tar.gz build/bin/Release/${{ inputs.name }}Lv2Compare 2.35
@@ -316,7 +355,8 @@ jobs:
           xvfb-run -a bash tools/external/hadronychecore/tools/linux/test-tarball.sh ${{ inputs.name }} installer/*-x86_64.tar.gz tools/build/bin/Release/validator tools/build/bin/Release/${{ inputs.name }}Tests 2.35
           bash tools/external/hadronychecore/tools/linux/test-lv2-tarball.sh ${{ inputs.name }} installer/*-LV2.tar.gz installer/*-x86_64.tar.gz tools/build/bin/Release/${{ inputs.name }}Lv2Compare 2.35
 
-  # Runs for a version tag, once every build and installer has passed.
+  # Runs for a version tag, once every build and installer has passed. A tag with a suffix, such as v1.5.0-alpha.1, makes a
+  # pre-release, which GitHub doesn't show as the latest release.
   release:
     name: Release
     needs: [build-and-test, macos, linux, linux-package, linux-elsewhere]
@@ -347,4 +387,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" installer-output/* --title "${{ inputs.name }} $TAG" --notes-file "docs/release-notes/$TAG.md" --verify-tag
+        run: |
+          prerelease=''
+          case "$TAG" in *-*) prerelease=--prerelease ;; esac
+          gh release create "$TAG" installer-output/* --title "${{ inputs.name }} $TAG" --notes-file "docs/release-notes/$TAG.md" --verify-tag $prerelease

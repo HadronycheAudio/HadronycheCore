@@ -42,7 +42,7 @@ target_link_libraries(MyPluginTests PRIVATE hadronyche_testhost)
 hadronyche_add_host_tests(MyPluginTests MyPlugin first-test second-test)
 ```
 
-A plug-in's CI is `.github/workflows/plugin-ci.yml` here, which its own workflow calls with its name and Audio Unit codes, pinned to the commit its submodule points at. It builds and tests on Windows, macOS and Linux, builds the installers and tarballs with `tools/windows/`, `tools/macos/` and `tools/linux/`, tests them, and publishes a release for a version tag.
+A plug-in's CI is `.github/workflows/plugin-ci.yml` here, which its own workflow calls with its name and Audio Unit codes, pinned to the commit its submodule points at. It builds and tests on Windows, macOS and Linux, builds the installers and tarballs with `tools/windows/`, `tools/macos/` and `tools/linux/`, tests them, and publishes a release for a version tag. A tag with a suffix, such as `v1.5.0-alpha.1` on version 1.5.0, publishes a pre-release instead, with the installers named after the whole tag.
 
 The SDK isn't a submodule here, because a plug-in would then clone it twice.
 
